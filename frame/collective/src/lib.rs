@@ -422,7 +422,7 @@ mod tests {
 		type Origin = Origin;
 		type Index = u64;
 		type BlockNumber = u64;
-		type Call = ();
+		type Call = Call;
 		type Hash = H256;
 		type Hashing = BlakeTwo256;
 		type AccountId = u64;
@@ -443,11 +443,13 @@ mod tests {
 		type Origin = Origin;
 		type Proposal = Call;
 		type Event = Event;
+		type Dispatcher = frame_system::Module<Test>;
 	}
 	impl Trait for Test {
 		type Origin = Origin;
 		type Proposal = Call;
 		type Event = Event;
+		type Dispatcher = frame_system::Module<Test>;
 	}
 
 	pub type Block = sp_runtime::generic::Block<Header, UncheckedExtrinsic>;
