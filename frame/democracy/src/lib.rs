@@ -1295,7 +1295,7 @@ mod tests {
 		type Origin = Origin;
 		type Index = u64;
 		type BlockNumber = u64;
-		type Call = ();
+		type Call = Call;
 		type Hash = H256;
 		type Hashing = BlakeTwo256;
 		type AccountId = u64;
@@ -1368,6 +1368,7 @@ mod tests {
 		type CooloffPeriod = CooloffPeriod;
 		type PreimageByteDeposit = PreimageByteDeposit;
 		type Slash = ();
+		type Dispatcher = frame_system::Module<Test>;
 	}
 
 	fn new_test_ext() -> sp_io::TestExternalities {
