@@ -656,6 +656,7 @@ mod tests {
 		type MultisigDepositBase = MultisigDepositBase;
 		type MultisigDepositFactor = MultisigDepositFactor;
 		type MaxSignatories = MaxSignatories;
+		type Dispatcher = System;
 	}
 	type System = frame_system::Module<Test>;
 	type Balances = pallet_balances::Module<Test>;
