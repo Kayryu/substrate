@@ -150,7 +150,7 @@ impl pallet_utility::Trait for Runtime {
 	type MultisigDepositBase = MultisigDepositBase;
 	type MultisigDepositFactor = MultisigDepositFactor;
 	type MaxSignatories = MaxSignatories;
-	type Dispatcher = ();
+	type Dispatcher = frame_system::Module<Runtime>;
 }
 
 parameter_types! {
@@ -329,7 +329,7 @@ impl pallet_democracy::Trait for Runtime {
 	type CooloffPeriod = CooloffPeriod;
 	type PreimageByteDeposit = PreimageByteDeposit;
 	type Slash = Treasury;
-	type Dispatcher = ();
+	type Dispatcher = frame_system::Module<Runtime>;
 }
 
 type CouncilCollective = pallet_collective::Instance1;
@@ -337,7 +337,7 @@ impl pallet_collective::Trait<CouncilCollective> for Runtime {
 	type Origin = Origin;
 	type Proposal = Call;
 	type Event = Event;
-	type Dispatcher = ();
+	type Dispatcher = frame_system::Module<Runtime>;
 }
 
 parameter_types! {
@@ -368,7 +368,7 @@ impl pallet_collective::Trait<TechnicalCollective> for Runtime {
 	type Origin = Origin;
 	type Proposal = Call;
 	type Event = Event;
-	type Dispatcher = ();
+	type Dispatcher = frame_system::Module<Runtime>;
 }
 
 impl pallet_membership::Trait<pallet_membership::Instance1> for Runtime {
@@ -427,7 +427,7 @@ impl pallet_contracts::Trait for Runtime {
 	type Event = Event;
 	type DetermineContractAddress = pallet_contracts::SimpleAddressDeterminer<Runtime>;
 	type ComputeDispatchFee = pallet_contracts::DefaultDispatchFeeComputor<Runtime>;
-	type Dispatcher = ();
+	type Dispatcher = frame_system::Module<Runtime>;
 	type TrieIdGenerator = pallet_contracts::TrieIdFromParentCounter<Runtime>;
 	type GasPayment = ();
 	type RentPayment = ();
@@ -450,7 +450,7 @@ impl pallet_contracts::Trait for Runtime {
 impl pallet_sudo::Trait for Runtime {
 	type Event = Event;
 	type Call = Call;
-	type Dispatcher = ();
+	type Dispatcher = frame_system::Module<Runtime>;
 }
 
 /// A runtime transaction submitter.
@@ -568,7 +568,7 @@ impl pallet_recovery::Trait for Runtime {
 	type FriendDepositFactor = FriendDepositFactor;
 	type MaxFriends = MaxFriends;
 	type RecoveryDeposit = RecoveryDeposit;
-	type Dispatcher = ();
+	type Dispatcher = frame_system::Module<Runtime>;
 }
 
 parameter_types! {
