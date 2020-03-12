@@ -871,7 +871,7 @@ decl_module! {
 		/// # </weight>
 		#[weight = SimpleDispatchInfo::FixedNormal(200_000)]
 		fn veto_external(origin, proposal_hash: T::Hash) {
-			let who = T::VetoOrigin::ensure_origin(origin)?;
+			let who = ensure_origin(origin)?;
 
 			if let Some((e_proposal_hash, _)) = <NextExternal<T>>::get() {
 				ensure!(proposal_hash == e_proposal_hash, Error::<T>::ProposalMissing);

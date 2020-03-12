@@ -200,4 +200,19 @@ benchmarks! {
 		let delay = 0;
 
 	}: _(RawOrigin::Root, proposal_hash, voting_period.into(), delay.into())
+
+	veto_external {
+		let u in ...;
+
+		let proposal_hash: T::Hash = Default::default();
+		Democracy::<T>::external_propose_default(RawOrigin::Root.into(), proposal_hash.clone())?;
+
+		let i in 1 .. u => {
+			let caller: T::AccountId = account("caller", 0, i);
+			Democracy::<T>::veto_external(RawOrigin::Signed(caller).into(), proposal_hash.clone())?;
+		};
+	
+		let caller: T::AccountId = account("caller", 0, u);
+			
+	}: _(RawOrigin::Signed(caller), proposal_hash)
 }
