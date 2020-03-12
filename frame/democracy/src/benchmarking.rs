@@ -103,7 +103,7 @@ benchmarks! {
 		T::Currency::make_free_balance_be(&caller, BalanceOf::<T>::max_value());
 
 		// Add a proposal.
-		add_proposals::<T>(1);
+		add_proposals::<T>(1)?;
 
 		// Inject referendum.
 		let proposal_hash: T::Hash = Default::default();
@@ -140,8 +140,8 @@ benchmarks! {
 		let r = Democracy::<T>::activate_proxy(RawOrigin::Signed(caller).into(), proxy.clone());
 		#[cfg(feature = "std")]
 		println!("result of activate proxy {:?}", r);
-					
-		add_proposals::<T>(1);
+
+		add_proposals::<T>(1)?;
 
 		let proposal_hash: T::Hash = Default::default();
 		let vote_threshold = VoteThreshold::SimpleMajority;
@@ -162,7 +162,8 @@ benchmarks! {
 	emergency_cancel {
 		let u in ...;
 
-		add_referendums::<T>(1);
+		add_referendums::<T>(1)?;
+
 	}: _(RawOrigin::Root, 0u32.into())
 
 	external_propose {
@@ -170,5 +171,6 @@ benchmarks! {
 
 		let caller: T::AccountId = account("caller", 0, SEED);
 		let proposal_hash: T::Hash = Default::default();
-	}: _(RawOrigin::Signed(caller), proposal_hash)
+
+	}: _(RawOrigin::Root, proposal_hash)
 }
