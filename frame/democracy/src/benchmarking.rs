@@ -209,4 +209,11 @@ benchmarks! {
 		Democracy::<T>::external_propose_default(RawOrigin::Root.into(), proposal_hash.clone())?;
 	
 	}: _(RawOrigin::Signed(caller), proposal_hash)
+
+	cancel_referendum {
+		let u in ...;
+
+		add_referendums::<T>(1)?;
+
+	}: _(RawOrigin::Root, 0u32.into())
 }
