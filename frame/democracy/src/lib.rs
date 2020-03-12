@@ -731,7 +731,6 @@ decl_module! {
 				.map(|_| ())
 				.or_else(ensure_root)?;
 
-
 			let info = Self::referendum_info(ref_index).ok_or(Error::<T>::BadIndex)?;
 			let h = info.proposal_hash;
 			ensure!(!<Cancellations<T>>::contains_key(h), Error::<T>::AlreadyCanceled);
@@ -753,7 +752,10 @@ decl_module! {
 		/// # </weight>
 		#[weight = SimpleDispatchInfo::FixedNormal(5_000_000)]
 		fn external_propose(origin, proposal_hash: T::Hash) {
-			T::ExternalOrigin::ensure_origin(origin)?;
+			T::ExternalOrigin::try_origin(origin)
+				.map(|_| ())
+				.or_else(ensure_root)?;
+
 			ensure!(!<NextExternal<T>>::exists(), Error::<T>::DuplicateProposal);
 			if let Some((until, _)) = <Blacklist<T>>::get(proposal_hash) {
 				ensure!(

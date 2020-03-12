@@ -160,10 +160,17 @@ benchmarks! {
 	}: _(RawOrigin::Signed(proxy), 0u32.into(), v)
 
 	emergency_cancel {
-		// The execution time doesn't seems to change depending on inputs.
 		let u in ...;
 
 		add_referendums::<T>(1);
 
 	}: _(RawOrigin::Root, 0u32.into())
+
+	external_propose {
+		let u in ...;
+
+		let caller: T::AccountId = account("caller", 0, SEED);
+		let proposal_hash: T::Hash = Default::default();
+
+	}: _(RawOrigin::Signed(caller), proposal_hash)
 }
