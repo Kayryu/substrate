@@ -207,7 +207,7 @@ benchmarks! {
 		let proposal_hash: T::Hash = Default::default();
 		Democracy::<T>::external_propose_default(RawOrigin::Root.into(), proposal_hash.clone())?;
 
-		for i in 1 .. u => {
+		for i in 1 .. u {
 			let caller: T::AccountId = account("caller", 0, i);
 			Democracy::<T>::veto_external(RawOrigin::Signed(caller).into(), proposal_hash.clone())?;
 		};
