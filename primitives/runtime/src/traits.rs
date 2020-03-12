@@ -372,6 +372,9 @@ pub trait OffchainWorker<BlockNumber> {
 	/// with results to trigger any on-chain changes.
 	/// Any state alterations are lost and are not persisted.
 	fn offchain_worker(_n: BlockNumber) {}
+
+	/// write a key value to a offchain worker
+	fn offchain_write_kv(_k:&[u8],_v:&[u8]) {}
 }
 
 /// Abstraction around hashing
