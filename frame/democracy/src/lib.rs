@@ -168,7 +168,9 @@ use frame_support::{
 };
 use frame_system::{self as system, ensure_signed, ensure_root};
 
+#[cfg(feature = "runtime-benchmarks")]
 pub mod benchmarking;
+
 mod vote_threshold;
 
 pub use vote_threshold::{Approved, VoteThreshold};
