@@ -225,7 +225,7 @@ benchmarks! {
 		let block_number: T::BlockNumber = 0.into();
 		let hash: T::Hash = Default::default();
 		let referendum_index: ReferendumIndex = 0u32.into(); 
-		<DispatchQueue<T>>::put(vec![(block_number, Default::default(), referendum_index)]);
+		<DispatchQueue<T>>::put(vec![(block_number, hash, referendum_index)]);
 
 	}: _(RawOrigin::Root, 0u32.into())
 }
