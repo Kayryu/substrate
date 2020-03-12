@@ -19,10 +19,8 @@
 use super::*;
 
 use frame_system::{RawOrigin, self};
-use sp_io::hashing::blake2_256;
 use frame_benchmarking::{benchmarks, account};
-use sp_core::hash::H256;
-use sp_runtime::traits::{Bounded, Dispatchable, StaticLookup};
+use sp_runtime::traits::Bounded;
 use frame_support::traits::{Currency, Get};
 
 use crate::Module as Democracy;
@@ -33,9 +31,6 @@ const MAX_REFERENDUMS: u32 = 100;
 const MAX_USERS: u32 = 100;
 
 fn add_proposals<T: Trait>(number: u32) -> Result<(), &'static str> {
-	#[cfg(feature = "std")]
-	println!("add_proposal {}", number);
-
 	for p in 0 .. number {
 		let other: T::AccountId = account("other", p, SEED);
 		let _ = T::Currency::make_free_balance_be(&other, BalanceOf::<T>::max_value());
@@ -49,13 +44,9 @@ fn add_proposals<T: Trait>(number: u32) -> Result<(), &'static str> {
 }
 
 fn add_referendums<T: Trait>(number: u32) -> Result<(), &'static str> {
-	#[cfg(feature = "std")]
-	println!("add_referendum {}", number);
+	for _ in 0 .. number {
+		add_proposals::<T>(1)?;
 
-	for p in 0 .. number {
-		
-		add_proposals::<T>(1);
-		
 		let vote_threshold = VoteThreshold::SimpleMajority;
 		Democracy::<T>::inject_referendum(
 			0.into(),
@@ -220,7 +211,7 @@ benchmarks! {
 	cancel_queued {
 		let u in ...;
 
-		// TODO: we could add more items to the DispatchQueue to bench, but I guess they should be a low amount.
+		// TODO: we could add more items to the DispatchQueue to bench.
 		add_referendums::<T>(1)?;
 		let block_number: T::BlockNumber = 0.into();
 		let hash: T::Hash = Default::default();
