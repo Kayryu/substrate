@@ -194,6 +194,8 @@ benchmarks! {
 		let u in ...;
 
 		let proposal_hash: T::Hash = Default::default();
+		Democracy::<T>::external_propose_default(RawOrigin::Root, proposal_hash.clone())?;
+
 		let voting_period = 0;
 		let delay = 0;
 
