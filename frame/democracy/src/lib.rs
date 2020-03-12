@@ -972,8 +972,6 @@ decl_module! {
 			let who = ensure_signed(origin)?;
 			Proxy::<T>::mutate(&who, |a| {
 				if a.is_some() {
-					#[cfg(feature = "std")]
-					println!("dec ref");
 					system::Module::<T>::dec_ref(&who);
 				}
 				*a = None;

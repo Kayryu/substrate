@@ -237,7 +237,18 @@ benchmarks! {
 		let proxy: T::AccountId = account("proxy", u + 1, SEED);
 
 		Democracy::<T>::open_proxy(RawOrigin::Signed(proxy.clone()).into(), caller.clone())?;
-		Democracy::<T>::activate_proxy(RawOrigin::Signed(caller.clone()).into(), proxy.clone())?;
+		Democracy::<T>::activate_proxy(RawOrigin::Signed(caller).into(), proxy.clone())?;
 
 	}: _(RawOrigin::Signed(proxy))
+
+	desactivate_proxy {
+		let u in ...;
+
+		let caller: T::AccountId = account("caller", u, SEED);
+		let proxy: T::AccountId = account("proxy", u + 1, SEED);
+
+		Democracy::<T>::open_proxy(RawOrigin::Signed(proxy.clone()).into(), caller.clone())?;
+		Democracy::<T>::activate_proxy(RawOrigin::Signed(caller.clone()).into(), proxy.clone())?;
+
+	}: _(RawOrigin::Signed(caller), proxy)
 }
