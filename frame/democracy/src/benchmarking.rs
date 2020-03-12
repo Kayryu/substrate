@@ -222,7 +222,7 @@ benchmarks! {
 
 		// TODO: we could add more items to the DispatchQueue to bench, but I guess they should be a low amount.
 		add_referendums::<T>(1)?;
-		<DispatchQueue<T>>::put(vec![(0, Default::default(), 0)]);
+		<DispatchQueue<T>>::put(vec![(0.into(), Default::default(), 0.into())]);
 
 	}: _(RawOrigin::Root, 0u32.into())
 }
