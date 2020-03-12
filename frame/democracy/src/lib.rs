@@ -837,7 +837,10 @@ decl_module! {
 			voting_period: T::BlockNumber,
 			delay: T::BlockNumber
 		) {
-			T::FastTrackOrigin::ensure_origin(origin)?;
+			T::FastTrackOrigin::try_origin(origin)
+				.map(|_| ())
+				.or_else(ensure_root)?;
+
 			let (e_proposal_hash, threshold) = <NextExternal<T>>::get().ok_or(Error::<T>::ProposalMissing)?;
 			ensure!(
 				threshold != VoteThreshold::SuperMajorityApprove,

@@ -193,10 +193,9 @@ benchmarks! {
 	fast_track {
 		let u in ...;
 
-		let caller: T::AccountId = account("caller", 0, SEED);
 		let proposal_hash: T::Hash = Default::default();
 		let voting_period = 0;
 		let delay = 0;
 
-	}: _(RawOrigin::Signed(caller), proposal_hash, voting_period.into(), delay.into())
+	}: _(RawOrigin::Root, proposal_hash, voting_period.into(), delay.into())
 }
