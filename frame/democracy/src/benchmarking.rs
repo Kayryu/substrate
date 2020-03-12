@@ -163,7 +163,6 @@ benchmarks! {
 		let u in ...;
 
 		add_referendums::<T>(1);
-
 	}: _(RawOrigin::Root, 0u32.into())
 
 	external_propose {
@@ -171,6 +170,5 @@ benchmarks! {
 
 		let caller: T::AccountId = account("caller", 0, SEED);
 		let proposal_hash: T::Hash = Default::default();
-
 	}: _(RawOrigin::Signed(caller), proposal_hash)
 }
