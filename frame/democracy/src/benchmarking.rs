@@ -219,4 +219,14 @@ benchmarks! {
 		<DispatchQueue<T>>::put(vec![(block_number, hash, referendum_index)]);
 
 	}: _(RawOrigin::Root, 0u32.into())
+
+	activate_proxy {
+		let u in ...;
+
+		let caller: T::AccountId = account("caller", u, SEED);
+		let proxy: T::AccountId = account("proxy", u + 1, SEED);
+
+		Democracy::<T>::open_proxy(RawOrigin::Signed(proxy.clone()).into(), caller.clone())?;
+
+	}: _(RawOrigin::Signed(caller), proxy)
 }

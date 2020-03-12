@@ -951,8 +951,6 @@ decl_module! {
 				None => Err(Error::<T>::NotOpen),
 				Some(ProxyState::Active(_)) => Err(Error::<T>::AlreadyProxy),
 				Some(ProxyState::Open(x)) if &x == &who => {
-					#[cfg(feature = "std")]
-					println!("proxy open mutated to active");
 					*a = Some(ProxyState::Active(who));
 					Ok(())
 				}
