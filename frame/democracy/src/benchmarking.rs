@@ -158,4 +158,12 @@ benchmarks! {
 		};
 
 	}: _(RawOrigin::Signed(proxy), 0u32.into(), v)
+
+	emergency_cancel {
+		// The execution time doesn't seems to change depending on inputs.
+		let u in ...;
+
+		add_referendums::<T>(1);
+
+	}: _(RawOrigin::Root, 0u32.into())
 }
