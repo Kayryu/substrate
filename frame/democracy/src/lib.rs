@@ -641,8 +641,6 @@ decl_module! {
 			T::Currency::reserve(&who, value)?;
 
 			let index = Self::public_prop_count();
-			#[cfg(feature = "std")]
-			println!("add proposed with index {:?}", index);
 
 			PublicPropCount::put(index + 1);
 			<DepositOf<T>>::insert(index, (value, &[&who][..]));
@@ -729,7 +727,10 @@ decl_module! {
 		/// # </weight>
 		#[weight = SimpleDispatchInfo::FixedOperational(500_000)]
 		fn emergency_cancel(origin, ref_index: ReferendumIndex) {
-			T::CancellationOrigin::ensure_origin(origin)?;
+			T::CancellationOrigin::try_origin(origin)
+				.map(|_| ())
+				.or_else(ensure_root)?;
+
 
 			let info = Self::referendum_info(ref_index).ok_or(Error::<T>::BadIndex)?;
 			let h = info.proposal_hash;
