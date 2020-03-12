@@ -241,7 +241,7 @@ benchmarks! {
 
 	}: _(RawOrigin::Signed(proxy))
 
-	desactivate_proxy {
+	deactivate_proxy {
 		let u in ...;
 
 		let caller: T::AccountId = account("caller", u, SEED);
