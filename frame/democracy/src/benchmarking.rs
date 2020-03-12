@@ -216,4 +216,12 @@ benchmarks! {
 		add_referendums::<T>(1)?;
 
 	}: _(RawOrigin::Root, 0u32.into())
+
+	cancel_queue {
+		let u in ...;
+
+		// TODO: we could add more items to the DispatchQueue to bench, but I guess they should be a low amount.
+		add_referendums::<T>(1)?;
+
+	}: _(RawOrigin::Root, 0u32.into())
 }
