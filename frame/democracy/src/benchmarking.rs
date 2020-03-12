@@ -259,5 +259,5 @@ benchmarks! {
 		T::Currency::make_free_balance_be(&caller, BalanceOf::<T>::max_value());
 		let delegate: T::AccountId = account("delegate", u, SEED);
 
-	}: _(RawOrigin::Signed(caller), delegate, Conviction::Locked1x)
+	}: _(RawOrigin::Signed(caller), delegate.into(), Conviction::Locked1x)
 }
