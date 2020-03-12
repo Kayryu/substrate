@@ -204,8 +204,9 @@ benchmarks! {
 	veto_external {
 		let u in ...;
 
+		let caller: T::AccountId = account("caller", 0, SEED);
 		let proposal_hash: T::Hash = Default::default();
 		Democracy::<T>::external_propose_default(RawOrigin::Root.into(), proposal_hash.clone())?;
 	
-	}: _(RawOrigin::Root, proposal_hash)
+	}: _(RawOrigin::Signed(caller), proposal_hash)
 }
