@@ -276,4 +276,9 @@ benchmarks! {
 		let d: T::AccountId = account("delegator", u + 1, SEED);
 
 	}: _(RawOrigin::Signed(d))
+
+	clear_public_proposals {
+		let u in ...;
+
+	}: _(RawOrigin::Root)
 }
