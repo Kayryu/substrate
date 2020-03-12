@@ -268,12 +268,12 @@ benchmarks! {
 		T::Currency::make_free_balance_be(&caller, BalanceOf::<T>::max_value());
 
 		for i in 0 .. u {
-			let d: T::AccountId = account("delegate", u + i + 1, SEED);
+			let d: T::AccountId = account("delegator", u + i + 1, SEED);
 			let conviction = Conviction::Locked1x;
-			Democracy::<T>::delegate(RawOrigin::Signed(caller.clone()).into(), d.into(), conviction)?;
+			Democracy::<T>::delegate(RawOrigin::Signed(d.clone()).into(), caller.clone().into(), conviction)?;
 		}
 
-		let d: T::AccountId = account("delegate", u + 1, SEED);
+		let d: T::AccountId = account("delegator", u + 1, SEED);
 
 	}: _(RawOrigin::Signed(d))
 }
