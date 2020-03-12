@@ -173,4 +173,20 @@ benchmarks! {
 		let proposal_hash: T::Hash = Default::default();
 
 	}: _(RawOrigin::Root, proposal_hash)
+
+	external_propose_majority {
+		let u in ...;
+
+		let caller: T::AccountId = account("caller", 0, SEED);
+		let proposal_hash: T::Hash = Default::default();
+
+	}: _(RawOrigin::Root, proposal_hash)
+
+	external_propose_default {
+		let u in ...;
+
+		let caller: T::AccountId = account("caller", 0, SEED);
+		let proposal_hash: T::Hash = Default::default();
+
+	}: _(RawOrigin::Root, proposal_hash)
 }

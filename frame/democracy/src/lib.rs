@@ -782,7 +782,10 @@ decl_module! {
 		/// # </weight>
 		#[weight = SimpleDispatchInfo::FixedNormal(5_000_000)]
 		fn external_propose_majority(origin, proposal_hash: T::Hash) {
-			T::ExternalMajorityOrigin::ensure_origin(origin)?;
+			T::ExternalMajorityOrigin::try_origin(origin)
+				.map(|_| ())
+				.or_else(ensure_root)?;
+
 			<NextExternal<T>>::put((proposal_hash, VoteThreshold::SimpleMajority));
 		}
 
@@ -802,7 +805,10 @@ decl_module! {
 		/// # </weight>
 		#[weight = SimpleDispatchInfo::FixedNormal(5_000_000)]
 		fn external_propose_default(origin, proposal_hash: T::Hash) {
-			T::ExternalDefaultOrigin::ensure_origin(origin)?;
+			T::ExternalDefaultOrigin::try_origin(origin)
+				.map(|_| ())
+				.or_else(ensure_root)?;
+
 			<NextExternal<T>>::put((proposal_hash, VoteThreshold::SuperMajorityAgainst));
 		}
 
