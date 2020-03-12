@@ -251,4 +251,13 @@ benchmarks! {
 		Democracy::<T>::activate_proxy(RawOrigin::Signed(caller.clone()).into(), proxy.clone())?;
 
 	}: _(RawOrigin::Signed(caller), proxy)
+
+	delegate {
+		let u in ...;
+
+		let caller: T::AccountId = account("caller", u, SEED);
+		T::Currency::make_free_balance_be(&caller, BalanceOf::<T>::max_value());
+		let delegate: T::AccountId = account("delegate", u, SEED);
+
+	}: _(RawOrigin::Signed(caller), delegate, Conviction::Locked1x)
 }
