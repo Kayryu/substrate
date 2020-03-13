@@ -337,6 +337,10 @@ benchmarks! {
 		let referendum_index: ReferendumIndex = 0u32.into(); 
 		<DispatchQueue<T>>::put(vec![(block_number, proposal_hash, referendum_index)]);
 
+		// We need to set this otherwise we get `Early` error.
+		let block_number = T::VotingPeriod::get();
+		System::<T>::set_block_number(block_number.into());
+
 		Democracy::<T>::note_preimage(RawOrigin::Signed(caller.clone()).into(), encoded_proposal)?;
 
 	}: _(RawOrigin::Signed(caller), proposal_hash)
