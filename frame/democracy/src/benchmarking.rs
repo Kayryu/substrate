@@ -332,7 +332,7 @@ benchmarks! {
 			encoded_proposal.push(Default::default());
 		}
 
-		Democracy::<T>::note_preimage(RawOrigin::Signed(caller.clone()).into(), encoded_proposal)?;
+		Democracy::<T>::note_preimage(RawOrigin::Signed(caller.clone()).into(), encoded_proposal.clone())?;
 
 		// We need to set this otherwise we get `Early` error.
 		let block_number = T::VotingPeriod::get();
