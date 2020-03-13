@@ -1160,6 +1160,8 @@ decl_module! {
 			let now = <frame_system::Module<T>>::block_number();
 			let (voting, enactment) = (T::VotingPeriod::get(), T::EnactmentPeriod::get());
 			let additional = if who == old { Zero::zero() } else { enactment };
+			#[cfg(feature = "std")]
+			println!("now {:?} >= then {:?} voting {:?} addit {:?}", now, then, voting, additional);
 			ensure!(now >= then + voting + additional, Error::<T>::Early);
 
 			let queue = <DispatchQueue<T>>::get();
@@ -1211,8 +1213,6 @@ decl_module! {
 			let who = ensure_signed(origin)?;
 			Proxy::<T>::mutate(&who, |a| {
 				if a.is_none() {
-					#[cfg(feature = "std")]
-					println!("in the if ofopen proxy");
 					system::Module::<T>::inc_ref(&who);
 				}
 				*a = Some(ProxyState::Open(target));
