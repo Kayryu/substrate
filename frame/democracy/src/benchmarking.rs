@@ -290,6 +290,7 @@ benchmarks! {
 
 		let mut encoded_proposal = vec![];
 		for i in 0 .. u {
+			// TODO: it may be interesting to see the relation between u and deposit reserved.
 			encoded_proposal.push(Default::default());
 		}
 
