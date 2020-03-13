@@ -341,4 +341,13 @@ benchmarks! {
 		let proposal_hash = T::Hashing::hash(&encoded_proposal[..]);
 
 	}: _(RawOrigin::Signed(caller), proposal_hash)
+
+	unlock {
+		let u in ...;
+
+		let caller: T::AccountId = account("caller", u, SEED);
+		let locked_until = 0;
+		Locks::<T>::insert(&caller, locked_until.into());
+
+	}: _(RawOrigin::Signed(caller.clone()), caller)
 }
