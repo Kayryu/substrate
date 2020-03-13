@@ -1211,6 +1211,8 @@ decl_module! {
 			let who = ensure_signed(origin)?;
 			Proxy::<T>::mutate(&who, |a| {
 				if a.is_none() {
+					#[cfg(feature = "std")]
+					println!("in the if ofopen proxy");
 					system::Module::<T>::inc_ref(&who);
 				}
 				*a = Some(ProxyState::Open(target));

@@ -220,6 +220,14 @@ benchmarks! {
 
 	}: _(RawOrigin::Root, 0u32.into())
 
+	open_proxy {
+		let u in ...;
+
+		let caller: T::AccountId = account("caller", u, SEED);
+		let proxy: T::AccountId = account("proxy", u + 1, SEED);
+
+	}: _(RawOrigin::Signed(proxy), caller)
+
 	activate_proxy {
 		let u in ...;
 
