@@ -295,4 +295,23 @@ benchmarks! {
 		}
 
 	}: _(RawOrigin::Signed(caller), encoded_proposal)
+
+	note_imminent_preimage {
+		let u in ...;
+
+		let caller: T::AccountId = account("caller", u, SEED);
+		T::Currency::make_free_balance_be(&caller, BalanceOf::<T>::max_value());
+
+		let mut encoded_proposal = vec![];
+		for i in 0 .. u {
+			// TODO: it may be interesting to see the relation between u and deposit reserved.
+			encoded_proposal.push(Default::default());
+		}
+
+		let proposal_hash = T::Hashing::hash(&encoded_proposal[..]);
+		let block_number: T::BlockNumber = 0.into();
+		let referendum_index: ReferendumIndex = 0u32.into(); 
+		<DispatchQueue<T>>::put(vec![(block_number, proposal_hash, referendum_index)]);
+
+	}: _(RawOrigin::Signed(caller), encoded_proposal)
 }
