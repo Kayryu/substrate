@@ -346,7 +346,7 @@ benchmarks! {
 		let u in ...;
 
 		let caller: T::AccountId = account("caller", u, SEED);
-		let locked_until = 0u32;
+		let locked_until: T::BlockNumber = 0u32.into();
 		Locks::<T>::insert(&caller, locked_until);
 
 	}: _(RawOrigin::Signed(caller.clone()), caller)
