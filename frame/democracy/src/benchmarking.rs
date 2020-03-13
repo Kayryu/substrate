@@ -18,7 +18,7 @@
 
 use super::*;
 
-use frame_system::{RawOrigin, self};
+use frame_system::{RawOrigin, Module as System, self};
 use frame_benchmarking::{benchmarks, account};
 use sp_runtime::traits::Bounded;
 use frame_support::traits::{Currency, Get};
