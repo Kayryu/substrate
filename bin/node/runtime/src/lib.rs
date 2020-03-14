@@ -612,6 +612,12 @@ impl pallet_vesting::Trait for Runtime {
 	type MinVestedTransfer = MinVestedTransfer;
 }
 
+use template;
+
+impl template::Trait for Runtime {
+	type Event = Event;
+}
+
 construct_runtime!(
 	pub enum Runtime where
 		Block = Block,
@@ -646,6 +652,7 @@ construct_runtime!(
 		Society: pallet_society::{Module, Call, Storage, Event<T>, Config<T>},
 		Recovery: pallet_recovery::{Module, Call, Storage, Event<T>},
 		Vesting: pallet_vesting::{Module, Call, Storage, Event<T>, Config<T>},
+		TemplateModule: template::{Module, Call, Storage, Event<T>},
 	}
 );
 

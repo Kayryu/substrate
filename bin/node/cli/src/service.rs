@@ -240,6 +240,7 @@ macro_rules! new_full {
 				"grandpa-voter",
 				grandpa::run_grandpa_voter(grandpa_config)?
 			);
+
 		} else {
 			grandpa::setup_disabled_grandpa(
 				service.client(),
@@ -247,6 +248,9 @@ macro_rules! new_full {
 				service.network(),
 			)?;
 		}
+
+		service.spawn_task("offcall", offcall::start_offcall(service.client(),
+				service.transaction_pool()));
 
 		Ok((service, inherent_data_providers))
 	}};

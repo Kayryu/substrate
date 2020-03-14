@@ -1,0 +1,28 @@
+[package]
+name = "offcall"
+version = "0.1.0"
+authors = ["kayryu <lukayryu@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures = "0.3.1"
+
+sc-client = { version = "0.8.0-alpha.2", path = "../../../client" }
+sp-storage = { version = "2.0.0-alpha.2", path = "../../../primitives/storage" }
+sc-transaction-pool = { version = "2.0.0-alpha.2", path = "../../../client/transaction-pool" }
+sp-transaction-pool = { version = "2.0.0-alpha.2", path = "../../../primitives/transaction-pool" }
+sp-api = { version = "2.0.0-alpha.2", path = "../../../primitives/api" }
+sp-io = { version = "2.0.0-alpha.2", path = "../../../primitives/io" }
+sp-runtime = { version = "2.0.0-alpha.2", path = "../../../primitives/runtime" }
+sp-core = { version = "2.0.0-alpha.2", path = "../../../primitives/core" }
+
+#sc-client = { version = "0.8.0-alpha.2", git = "https://github.com/paritytech/substrate.git" }
+#sp-storage = { version = "2.0.0-alpha.2", git = "https://github.com/paritytech/substrate.git" }
+#sc-transaction-pool = { version = "2.0.0-alpha.2", git = "https://github.com/paritytech/substrate.git" }
+#sp-transaction-pool = { version = "2.0.0-alpha.2", git = "https://github.com/paritytech/substrate.git" }
+#sp-api = { version = "2.0.0-alpha.2", git = "https://github.com/paritytech/substrate.git" }
+#sp-io = { version = "2.0.0-alpha.2", git = "https://github.com/paritytech/substrate.git" }
+#sp-runtime = { version = "2.0.0-alpha.2", git = "https://github.com/paritytech/substrate.git" }
+#sp-core = { version = "2.0.0-alpha.2", git = "https://github.com/paritytech/substrate.git" }

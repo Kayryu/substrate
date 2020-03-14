@@ -3350,6 +3350,7 @@ dependencies = [
  "node-rpc",
  "node-runtime",
  "node-transaction-factory",
+ "offcall",
  "pallet-authority-discovery",
  "pallet-balances",
  "pallet-contracts",
@@ -3532,6 +3533,7 @@ dependencies = [
  "pallet-staking",
  "pallet-staking-reward-curve",
  "pallet-sudo",
+ "pallet-template",
  "pallet-timestamp",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
@@ -3769,6 +3771,21 @@ dependencies = [
  "scroll",
  "target-lexicon",
  "uuid",
+]
+
+[[package]]
+name = "offcall"
+version = "0.1.0"
+dependencies = [
+ "futures 0.3.4",
+ "sc-client",
+ "sc-transaction-pool",
+ "sp-api",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-storage",
+ "sp-transaction-pool",
 ]
 
 [[package]]
