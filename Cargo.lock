@@ -3519,6 +3519,7 @@ dependencies = [
  "pallet-contracts-rpc-runtime-api",
  "pallet-democracy",
  "pallet-elections-phragmen",
+ "pallet-example-offchain-worker",
  "pallet-finality-tracker",
  "pallet-grandpa",
  "pallet-identity",
@@ -4170,7 +4171,6 @@ dependencies = [
  "frame-system",
  "parity-scale-codec",
  "serde",
- "serde_json",
  "sp-core",
  "sp-io",
  "sp-runtime",
@@ -7610,36 +7610,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "subkey"
-version = "2.0.0-alpha.3"
-dependencies = [
- "clap",
- "derive_more",
- "frame-system",
- "futures 0.1.29",
- "hex",
- "hex-literal",
- "hyper 0.12.35",
- "itertools",
- "jsonrpc-core-client",
- "libp2p",
- "node-primitives",
- "node-runtime",
- "pallet-balances",
- "pallet-transaction-payment",
- "parity-scale-codec",
- "rand 0.7.3",
- "rpassword",
- "rustc-hex",
- "sc-rpc",
- "serde_json",
- "sp-core",
- "sp-runtime",
- "substrate-bip39",
- "tiny-bip39",
 ]
 
 [[package]]

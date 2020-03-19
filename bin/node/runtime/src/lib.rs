@@ -618,6 +618,20 @@ impl template::Trait for Runtime {
 	type Event = Event;
 }
 
+parameter_types! {
+	pub const GracePeriod: BlockNumber = 10;
+	pub const UnsignedInterval: BlockNumber = 10;
+}
+
+impl pallet_example_offchain_worker::Trait for Runtime {
+	type Event = Event;
+	type Call = Call;
+	type SubmitUnsignedTransaction = SubmitTransaction;
+	type SubmitSignedTransaction = SubmitTransaction;
+	type GracePeriod = GracePeriod;
+	type UnsignedInterval = UnsignedInterval;
+}
+
 construct_runtime!(
 	pub enum Runtime where
 		Block = Block,
@@ -653,6 +667,7 @@ construct_runtime!(
 		Recovery: pallet_recovery::{Module, Call, Storage, Event<T>},
 		Vesting: pallet_vesting::{Module, Call, Storage, Event<T>, Config<T>},
 		TemplateModule: template::{Module, Call, Storage, Event<T>},
+		Offchain: pallet_example_offchain_worker::{Module, Call, Storage, Event<T>},
 	}
 );
 

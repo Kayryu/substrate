@@ -47,7 +47,7 @@ use frame_support::{
 	weights::SimpleDispatchInfo,
 };
 use frame_system::{self as system, ensure_signed, ensure_none, offchain};
-use serde_json as json;
+// use serde_json as json;
 use sp_core::crypto::KeyTypeId;
 use sp_runtime::{
 	offchain::{http, Duration, storage::StorageValueRef},
@@ -55,6 +55,7 @@ use sp_runtime::{
 	transaction_validity::{InvalidTransaction, ValidTransaction, TransactionValidity},
 };
 
+use sp_std::prelude::*;
 #[cfg(test)]
 mod tests;
 
@@ -211,14 +212,14 @@ decl_module! {
 			//
 			// We can easily import `frame_system` and retrieve a block hash of the parent block.
 			let parent_hash = <system::Module<T>>::block_hash(block_number - 1.into());
-			debug::debug!("Current block: {:?} (parent hash: {:?})", block_number, parent_hash);
+			debug::info!("Current block: {:?} (parent hash: {:?})", block_number, parent_hash);
 
 			// It's a good practice to keep `fn offchain_worker()` function minimal, and move most
 			// of the code to separate `impl` block.
 			// Here we call a helper function to calculate current average price.
 			// This function reads storage entries of the current state.
 			let average: Option<u32> = Self::average_price();
-			debug::debug!("Current price: {:?}", average);
+			debug::info!("Current price: {:?}", average);
 
 			// For this example we are going to send both signed and unsigned transactions
 			// depending on the block number.
@@ -230,7 +231,7 @@ decl_module! {
 				TransactionType::None => Ok(()),
 			};
 			if let Err(e) = res {
-				debug::error!("Error: {}", e);
+				debug::error!("Error: {:?}", e);
 			}
 		}
 	}
@@ -276,7 +277,7 @@ impl<T: Trait> Module<T> {
 			match last_send {
 				// If we already have a value in storage and the block number is recent enough
 				// we avoid sending another transaction at this time.
-				Some(Some(block)) if block + T::GracePeriod::get() < block_number => {
+				Some(Some(block)) if block_number < block + T::GracePeriod::get() => {
 					Err(RECENTLY_SENT)
 				},
 				// In every other case we attempt to acquire the lock and send a transaction.
@@ -320,7 +321,7 @@ impl<T: Trait> Module<T> {
 	}
 
 	/// A helper function to fetch the price and send signed transaction.
-	fn fetch_price_and_send_signed() -> Result<(), String> {
+	fn fetch_price_and_send_signed() -> DispatchResult {
 		use system::offchain::SubmitSignedTransaction;
 		// Firstly we check if there are any accounts in the local keystore that are capable of
 		// signing the transaction.
@@ -328,13 +329,13 @@ impl<T: Trait> Module<T> {
 		// to put the results back on-chain.
 		if !T::SubmitSignedTransaction::can_sign() {
 			return Err(
-				"No local accounts available. Consider adding one via `author_insertKey` RPC."
-			)?
+				"No local accounts available. Consider adding one via `author_insertKey` RPC.".into()
+			);
 		}
 
 		// Make an external HTTP request to fetch the current price.
 		// Note this call will block until response is received.
-		let price = Self::fetch_price().map_err(|e| format!("{:?}", e))?;
+		let price = Self::fetch_price().map_err(|e| "Fetch Prirce Error")?;
 
 		// Received price is wrapped into a call to `submit_price` public function of this pallet.
 		// This means that the transaction, when executed, will simply call that function passing
@@ -357,20 +358,20 @@ impl<T: Trait> Module<T> {
 	}
 
 	/// A helper function to fetch the price and send unsigned transaction.
-	fn fetch_price_and_send_unsigned(block_number: T::BlockNumber) -> Result<(), String> {
+	fn fetch_price_and_send_unsigned(block_number: T::BlockNumber) -> DispatchResult {
 		use system::offchain::SubmitUnsignedTransaction;
 		// Make sure we don't fetch the price if unsigned transaction is going to be rejected
 		// anyway.
 		let next_unsigned_at = <NextUnsignedAt<T>>::get();
 		if next_unsigned_at > block_number {
 			return Err(
-				format!("Too early to send unsigned transaction. Next at: {:?}", next_unsigned_at)
-			)?
+				"Too early to send unsigned transaction. Next at".into()
+			);
 		}
 
 		// Make an external HTTP request to fetch the current price.
 		// Note this call will block until response is received.
-		let price = Self::fetch_price().map_err(|e| format!("{:?}", e))?;
+		let price = Self::fetch_price().map_err(|e| "Fetch price error")?;
 
 		// Received price is wrapped into a call to `submit_price_unsigned` public function of this
 		// pallet. This means that the transaction, when executed, will simply call that function
@@ -424,29 +425,29 @@ impl<T: Trait> Module<T> {
 			return Err(http::Error::Unknown);
 		}
 
-		// Next we want to fully read the response body and collect it to a vector of bytes.
-		// Note that the return object allows you to read the body in chunks as well
-		// with a way to control the deadline.
-		let body = response.body().collect::<Vec<u8>>();
-		// Next we parse the response using `serde_json`. Even though it's possible to use
-		// `serde_derive` and deserialize to a struct it's not recommended due to blob size
-		// overhead introduced by such code. Deserializing to `json::Value` is much more
-		// lightweight and should be preferred, especially if we only care about a small number
-		// of properties from the response.
-		let val: Result<json::Value, _> = json::from_slice(&body);
-		// Let's parse the price as float value. Note that you should avoid using floats in the
-		// runtime, it's fine to do that in the offchain worker, but we do convert it to an integer
-		// before submitting on-chain.
-		let price = val.ok().and_then(|v| v.get("USD").and_then(|v| v.as_f64()));
-		let price = match price {
-			Some(pricef) => Ok((pricef * 100.) as u32),
-			None => {
-				let s = core::str::from_utf8(&body);
-				debug::warn!("Unable to extract price from the response: {:?}", s);
-				Err(http::Error::Unknown)
-			}
-		}?;
-
+		// // Next we want to fully read the response body and collect it to a vector of bytes.
+		// // Note that the return object allows you to read the body in chunks as well
+		// // with a way to control the deadline.
+		// let body = response.body().collect::<Vec<u8>>();
+		// // Next we parse the response using `serde_json`. Even though it's possible to use
+		// // `serde_derive` and deserialize to a struct it's not recommended due to blob size
+		// // overhead introduced by such code. Deserializing to `json::Value` is much more
+		// // lightweight and should be preferred, especially if we only care about a small number
+		// // of properties from the response.
+		// let val: Result<json::Value, _> = json::from_slice(&body);
+		// // Let's parse the price as float value. Note that you should avoid using floats in the
+		// // runtime, it's fine to do that in the offchain worker, but we do convert it to an integer
+		// // before submitting on-chain.
+		// let price = val.ok().and_then(|v| v.get("USD").and_then(|v| v.as_f64()));
+		// let price = match price {
+		// 	Some(pricef) => Ok((pricef * 100.) as u32),
+		// 	None => {
+		// 		let s = core::str::from_utf8(&body);
+		// 		debug::warn!("Unable to extract price from the response: {:?}", s);
+		// 		Err(http::Error::Unknown)
+		// 	}
+		// }?;
+		let price = 1;
 		debug::warn!("Got price: {} cents", price);
 
 		Ok(price)
