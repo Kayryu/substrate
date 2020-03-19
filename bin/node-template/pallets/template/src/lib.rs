@@ -10,7 +10,7 @@
 /// https://github.com/paritytech/substrate/blob/master/frame/example/src/lib.rs
 
 use frame_support::{decl_module, decl_storage, decl_event, decl_error, dispatch};
-use system::ensure_signed;
+use system::{ensure_signed, ensure_none};
 
 #[cfg(test)]
 mod mock;
@@ -33,6 +33,7 @@ decl_storage! {
 		// Here we are declaring a StorageValue, `Something` as a Option<u32>
 		// `get(fn something)` is the default getter which returns either the stored `u32` or `None` if nothing stored
 		Something get(fn something): Option<u32>;
+		Cell get(fn cell): Option<u32>;
 	}
 }
 
@@ -83,6 +84,20 @@ decl_module! {
 			// Here we are raising the Something event
 			Self::deposit_event(RawEvent::SomethingStored(something, who));
 			Ok(())
+		}
+
+		fn unsigned_call(origin) {
+			Cell::put(1);
+		}
+
+		fn unsigned_call_with(origin) {
+			ensure_none(origin)?;
+
+			Cell::put(2);
+		}
+
+		fn signed_call(origin) {
+			Cell::put(3);
 		}
 
 		/// Another dummy entry point.
