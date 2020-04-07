@@ -117,7 +117,7 @@ pub use sc_chain_spec_derive::{ChainSpecExtension, ChainSpecGroup};
 
 use serde::{Serialize, de::DeserializeOwned};
 use sp_runtime::BuildStorage;
-use sc_network::Multiaddr;
+use sc_network::config::MultiaddrWithPeerId;
 use sc_telemetry::TelemetryEndpoints;
 
 /// A set of traits for the runtime genesis config.
@@ -125,13 +125,13 @@ pub trait RuntimeGenesis: Serialize + DeserializeOwned + BuildStorage {}
 impl<T: Serialize + DeserializeOwned + BuildStorage> RuntimeGenesis for T {}
 
 /// Common interface to `GenericChainSpec`
-pub trait ChainSpec: BuildStorage {
+pub trait ChainSpec: BuildStorage + Send {
 	/// Spec name.
 	fn name(&self) -> &str;
 	/// Spec id.
 	fn id(&self) -> &str;
 	/// A list of bootnode addresses.
-	fn boot_nodes(&self) -> &[String];
+	fn boot_nodes(&self) -> &[MultiaddrWithPeerId];
 	/// Telemetry endpoints (if any)
 	fn telemetry_endpoints(&self) -> &Option<TelemetryEndpoints>;
 	/// Network protocol id.
@@ -143,7 +143,7 @@ pub trait ChainSpec: BuildStorage {
 	/// Returns a reference to defined chain spec extensions.
 	fn extensions(&self) -> &dyn GetExtension;
 	/// Add a bootnode to the list.
-	fn add_boot_node(&mut self, addr: Multiaddr);
+	fn add_boot_node(&mut self, addr: MultiaddrWithPeerId);
 	/// Return spec as JSON.
 	fn as_json(&self, raw: bool) -> Result<String, String>;
 	/// Return StorageBuilder for this spec.

@@ -17,14 +17,15 @@
 use std::path::PathBuf;
 use std::net::SocketAddr;
 use std::fs;
+use std::fmt;
 use log::info;
 use structopt::{StructOpt, clap::arg_enum};
 use names::{Generator, Name};
 use regex::Regex;
 use chrono::prelude::*;
 use sc_service::{
-	AbstractService, Configuration, ChainSpec, Roles,
-	config::{KeystoreConfig, PrometheusConfig},
+	AbstractService, Configuration, ChainSpec, Role,
+	config::{MultiaddrWithPeerId, KeystoreConfig, PrometheusConfig},
 };
 use sc_telemetry::TelemetryEndpoints;
 
@@ -78,11 +79,12 @@ pub struct RunCmd {
 	/// available to relay to private nodes.
 	#[structopt(
 		long = "sentry",
-		conflicts_with_all = &[ "validator", "light" ]
+		conflicts_with_all = &[ "validator", "light" ],
+		parse(try_from_str)
 	)]
-	pub sentry: bool,
+	pub sentry: Vec<MultiaddrWithPeerId>,
 
-	/// Disable GRANDPA voter when running in validator mode, otherwise disables the GRANDPA observer.
+	/// Disable GRANDPA voter when running in validator mode, otherwise disable the GRANDPA observer.
 	#[structopt(long = "no-grandpa")]
 	pub no_grandpa: bool,
 
@@ -92,7 +94,7 @@ pub struct RunCmd {
 
 	/// Listen to all RPC interfaces.
 	///
-	/// Default is local. Note: not all RPC methods are safe to be exposed publicly. Use a RPC proxy
+	/// Default is local. Note: not all RPC methods are safe to be exposed publicly. Use an RPC proxy
 	/// server to filter out dangerous methods. More details: https://github.com/paritytech/substrate/wiki/Public-RPC.
 	/// Use `--unsafe-rpc-external` to suppress the warning if you understand the risks.
 	#[structopt(long = "rpc-external")]
@@ -106,7 +108,7 @@ pub struct RunCmd {
 
 	/// Listen to all Websocket interfaces.
 	///
-	/// Default is local. Note: not all RPC methods are safe to be exposed publicly. Use a RPC proxy
+	/// Default is local. Note: not all RPC methods are safe to be exposed publicly. Use an RPC proxy
 	/// server to filter out dangerous methods. More details: https://github.com/paritytech/substrate/wiki/Public-RPC.
 	/// Use `--unsafe-ws-external` to suppress the warning if you understand the risks.
 	#[structopt(long = "ws-external")]
@@ -140,7 +142,7 @@ pub struct RunCmd {
 	///
 	/// A comma-separated list of origins (protocol://domain or special `null`
 	/// value). Value of `all` will disable origin validation. Default is to
-	/// allow localhost and https://polkadot.js.org origins. When running in 
+	/// allow localhost and https://polkadot.js.org origins. When running in
 	/// --dev mode the default is to allow all origins.
 	#[structopt(long = "rpc-cors", value_name = "ORIGINS", parse(try_from_str = parse_cors))]
 	pub rpc_cors: Option<Cors>,
@@ -169,10 +171,10 @@ pub struct RunCmd {
 
 	/// The URL of the telemetry server to connect to.
 	///
-	/// This flag can be passed multiple times as a mean to specify multiple
+	/// This flag can be passed multiple times as a means to specify multiple
 	/// telemetry endpoints. Verbosity levels range from 0-9, with 0 denoting
-	/// the least verbosity. If no verbosity level is specified the default is
-	/// 0.
+	/// the least verbosity.
+	/// Expected format is 'URL VERBOSITY', e.g. `--telemetry-url 'wss://foo/bar 0'`.
 	#[structopt(long = "telemetry-url", value_name = "URL VERBOSITY", parse(try_from_str = parse_telemetry_endpoints))]
 	pub telemetry_endpoints: Vec<(String, u8)>,
 
@@ -275,7 +277,7 @@ pub struct RunCmd {
 }
 
 impl RunCmd {
-	/// Get the `Sr25519Keyring` matching one of the flag
+	/// Get the `Sr25519Keyring` matching one of the flag.
 	pub fn get_keyring(&self) -> Option<sp_keyring::Sr25519Keyring> {
 		use sp_keyring::Sr25519Keyring::*;
 
@@ -290,7 +292,7 @@ impl RunCmd {
 		else { None }
 	}
 
-	/// Update and prepare a `Configuration` with command line parameters of `RunCmd` and `VersionInfo`
+	/// Update and prepare a `Configuration` with command line parameters of `RunCmd` and `VersionInfo`.
 	pub fn update_config<F>(
 		&self,
 		mut config: &mut Configuration,
@@ -329,18 +331,20 @@ impl RunCmd {
 		let keyring = self.get_keyring();
 		let is_dev = self.shared_params.dev;
 		let is_light = self.light;
-		let is_authority = (self.validator || self.sentry || is_dev || keyring.is_some())
+		let is_authority = (self.validator || is_dev || keyring.is_some())
 			&& !is_light;
 		let role =
 			if is_light {
-				sc_service::Roles::LIGHT
+				sc_service::Role::Light
 			} else if is_authority {
-				sc_service::Roles::AUTHORITY
+				sc_service::Role::Authority { sentry_nodes: self.network_config.sentry_nodes.clone() }
+			} else if !self.sentry.is_empty() {
+				sc_service::Role::Sentry { validators: self.sentry.clone() }
 			} else {
-				sc_service::Roles::FULL
+				sc_service::Role::Full
 			};
 
-		self.import_params.update_config(&mut config, role, is_dev)?;
+		self.import_params.update_config(&mut config, &role, is_dev)?;
 
 		config.name = match (self.name.as_ref(), keyring) {
 			(Some(name), _) => name.to_string(),
@@ -356,17 +360,14 @@ impl RunCmd {
 			));
 		}
 
-		// set sentry mode (i.e. act as an authority but **never** actively participate)
-		config.sentry_mode = self.sentry;
-
-		config.offchain_worker = match (&self.offchain_worker, role) {
-			(OffchainWorkerEnabled::WhenValidating, sc_service::Roles::AUTHORITY) => true,
+		config.offchain_worker = match (&self.offchain_worker, &role) {
+			(OffchainWorkerEnabled::WhenValidating, sc_service::Role::Authority { .. }) => true,
 			(OffchainWorkerEnabled::Always, _) => true,
 			(OffchainWorkerEnabled::Never, _) => false,
 			(OffchainWorkerEnabled::WhenValidating, _) => false,
 		};
 
-		config.roles = role;
+		config.role = role;
 		config.disable_grandpa = self.no_grandpa;
 
 		let client_id = config.client_id();
@@ -419,7 +420,7 @@ impl RunCmd {
 			config.telemetry_endpoints = None;
 		} else if !self.telemetry_endpoints.is_empty() {
 			config.telemetry_endpoints = Some(
-				TelemetryEndpoints::new(self.telemetry_endpoints.clone())
+				TelemetryEndpoints::new(self.telemetry_endpoints.clone()).map_err(|e| e.to_string())?
 			);
 		}
 
@@ -444,7 +445,7 @@ impl RunCmd {
 		Ok(())
 	}
 
-	/// Run the command that runs the node
+	/// Run the command that runs the node.
 	pub fn run<FNL, FNF, SL, SF>(
 		self,
 		config: Configuration,
@@ -459,14 +460,14 @@ impl RunCmd {
 		SF: AbstractService + Unpin,
 	{
 		info!("{}", version.name);
-		info!("  version {}", config.full_version());
-		info!("  by {}, {}-{}", version.author, version.copyright_start_year, Local::today().year());
-		info!("Chain specification: {}", config.expect_chain_spec().name());
-		info!("Node name: {}", config.name);
-		info!("Roles: {}", config.display_role());
+		info!("✌️  version {}", config.full_version());
+		info!("❤️  by {}, {}-{}", version.author, version.copyright_start_year, Local::today().year());
+		info!("📋 Chain specification: {}", config.expect_chain_spec().name());
+		info!("🏷  Node name: {}", config.name);
+		info!("👤 Role: {}", config.display_role());
 
-		match config.roles {
-			Roles::LIGHT => run_service_until_exit(
+		match config.role {
+			Role::Light => run_service_until_exit(
 				config,
 				new_light,
 			),
@@ -489,7 +490,7 @@ impl RunCmd {
 	}
 }
 
-/// Check whether a node name is considered as valid
+/// Check whether a node name is considered as valid.
 pub fn is_node_name_valid(_name: &str) -> Result<(), &str> {
 	let name = _name.to_string();
 	if name.chars().count() >= NODE_NAME_MAX_LENGTH {
@@ -565,16 +566,30 @@ fn interface_str(
 	}
 }
 
-/// Default to verbosity level 0, if none is provided.
-fn parse_telemetry_endpoints(s: &str) -> Result<(String, u8), Box<dyn std::error::Error>> {
+#[derive(Debug)]
+enum TelemetryParsingError {
+	MissingVerbosity,
+	VerbosityParsingError(std::num::ParseIntError),
+}
+
+impl std::error::Error for TelemetryParsingError {}
+
+impl fmt::Display for TelemetryParsingError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &*self {
+			TelemetryParsingError::MissingVerbosity => write!(f, "Verbosity level missing"),
+			TelemetryParsingError::VerbosityParsingError(e) => write!(f, "{}", e),
+		}
+	}
+}
+
+fn parse_telemetry_endpoints(s: &str) -> Result<(String, u8), TelemetryParsingError> {
 	let pos = s.find(' ');
 	match pos {
-		None => {
-			Ok((s.to_owned(), 0))
-		},
+		None => Err(TelemetryParsingError::MissingVerbosity),
 		Some(pos_) => {
-			let verbosity = s[pos_ + 1..].parse()?;
-			let url = s[..pos_].parse()?;
+			let url = s[..pos_].to_string();
+			let verbosity = s[pos_ + 1..].parse().map_err(TelemetryParsingError::VerbosityParsingError)?;
 			Ok((url, verbosity))
 		}
 	}
@@ -586,7 +601,7 @@ fn parse_telemetry_endpoints(s: &str) -> Result<(String, u8), Box<dyn std::error
 /// handling of `structopt`.
 #[derive(Clone, Debug)]
 pub enum Cors {
-	/// All hosts allowed
+	/// All hosts allowed.
 	All,
 	/// Only hosts on the list are allowed.
 	List(Vec<String>),
@@ -601,7 +616,7 @@ impl From<Cors> for Option<Vec<String>> {
 	}
 }
 
-/// Parse cors origins
+/// Parse cors origins.
 fn parse_cors(s: &str) -> Result<Cors, Box<dyn std::error::Error>> {
 	let mut is_all = false;
 	let mut origins = Vec::new();
@@ -688,8 +703,9 @@ mod tests {
 			"test",
 			"test-id",
 			|| (),
-			vec!["boo".to_string()],
-			Some(TelemetryEndpoints::new(vec![("foo".to_string(), 42)])),
+			vec!["/ip4/127.0.0.1/tcp/30333/p2p/QmdSHZLmwEL5Axz5JvWNE2mmxU7qyd7xHBFpyUfktgAdg7".parse().unwrap()],
+			Some(TelemetryEndpoints::new(vec![("wss://foo/bar".to_string(), 42)])
+				.expect("provided url should be valid")),
 			None,
 			None,
 			None::<()>,

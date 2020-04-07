@@ -84,13 +84,14 @@
 
 use sp_runtime::traits::{NumberFor, Block as BlockT, Zero};
 use sc_network_gossip::{MessageIntent, ValidatorContext};
-use sc_network::{config::Roles, PeerId, ReputationChange};
+use sc_network::{ObservedRole, PeerId, ReputationChange};
 use parity_scale_codec::{Encode, Decode};
 use sp_finality_grandpa::AuthorityId;
 
 use sc_telemetry::{telemetry, CONSENSUS_DEBUG};
 use log::{trace, debug};
-use futures::channel::mpsc;
+use sp_utils::mpsc::{tracing_unbounded, TracingUnboundedReceiver, TracingUnboundedSender};
+use prometheus_endpoint::{CounterVec, Opts, PrometheusError, register, Registry, U64};
 use rand::seq::SliceRandom;
 
 use crate::{environment, CatchUp, CompactCommit, SignedMessage};
@@ -438,11 +439,11 @@ impl Misbehavior {
 
 struct PeerInfo<N> {
 	view: View<N>,
-	roles: Roles,
+	roles: ObservedRole,
 }
 
 impl<N> PeerInfo<N> {
-	fn new(roles: Roles) -> Self {
+	fn new(roles: ObservedRole) -> Self {
 		PeerInfo {
 			view: View::default(),
 			roles,
@@ -468,14 +469,17 @@ impl<N> Default for Peers<N> {
 }
 
 impl<N: Ord> Peers<N> {
-	fn new_peer(&mut self, who: PeerId, roles: Roles) {
-		if roles.is_authority() && self.lucky_authorities.len() < MIN_LUCKY {
-			self.lucky_authorities.insert(who.clone());
+	fn new_peer(&mut self, who: PeerId, role: ObservedRole) {
+		match role {
+			ObservedRole::Authority if self.lucky_authorities.len() < MIN_LUCKY => {
+				self.lucky_authorities.insert(who.clone());
+			},
+			ObservedRole::Full | ObservedRole::Light if self.lucky_peers.len() < MIN_LUCKY => {
+				self.lucky_peers.insert(who.clone());
+			},
+			_ => {}
 		}
-		if !roles.is_authority() && self.lucky_peers.len() < MIN_LUCKY {
-			self.lucky_peers.insert(who.clone());
-		}
-		self.inner.insert(who, PeerInfo::new(roles));
+		self.inner.insert(who, PeerInfo::new(role));
 	}
 
 	fn peer_disconnected(&mut self, who: &PeerId) {
@@ -538,21 +542,28 @@ impl<N: Ord> Peers<N> {
 	}
 
 	fn authorities(&self) -> usize {
-		self.inner.iter().filter(|(_, info)| info.roles.is_authority()).count()
+		// Note that our sentry and our validator are neither authorities nor non-authorities.
+		self.inner.iter().filter(|(_, info)| matches!(info.roles, ObservedRole::Authority)).count()
 	}
 
 	fn non_authorities(&self) -> usize {
-		self.inner.iter().filter(|(_, info)| !info.roles.is_authority()).count()
+		// Note that our sentry and our validator are neither authorities nor non-authorities.
+		self.inner
+			.iter()
+			.filter(|(_, info)| matches!(info.roles, ObservedRole::Full | ObservedRole::Light))
+			.count()
 	}
 
 	fn reshuffle(&mut self) {
 		let mut lucky_peers: Vec<_> = self.inner
 			.iter()
-			.filter_map(|(id, info)| if !info.roles.is_authority() { Some(id.clone()) } else { None })
+			.filter_map(|(id, info)|
+				if matches!(info.roles, ObservedRole::Full | ObservedRole::Light) { Some(id.clone()) } else { None })
 			.collect();
 		let mut lucky_authorities: Vec<_> = self.inner
 			.iter()
-			.filter_map(|(id, info)| if info.roles.is_authority() { Some(id.clone()) } else { None })
+			.filter_map(|(id, info)|
+				if matches!(info.roles, ObservedRole::Authority) { Some(id.clone()) } else { None })
 			.collect();
 
 		let num_non_authorities = ((lucky_peers.len() as f32).sqrt() as usize)
@@ -632,8 +643,11 @@ impl CatchUpConfig {
 	fn request_allowed<N>(&self, peer: &PeerInfo<N>) -> bool {
 		match self {
 			CatchUpConfig::Disabled => false,
-			CatchUpConfig::Enabled { only_from_authorities, .. } =>
-				!only_from_authorities || peer.roles.is_authority(),
+			CatchUpConfig::Enabled { only_from_authorities, .. } => match peer.roles {
+				ObservedRole::Authority | ObservedRole::OurSentry |
+				ObservedRole::OurGuardedAuthority => true,
+				_ => !only_from_authorities
+			}
 		}
 	}
 }
@@ -721,7 +735,15 @@ impl<Block: BlockT> Inner<Block> {
 					last_commit: None,
 				}),
 				Some(ref mut v) => if v.set_id == set_id {
-					return None
+					if self.authorities != authorities {
+						debug!(target: "afg",
+							"Gossip validator noted set {:?} twice with different authorities. \
+							Was the authority set hard forked?",
+							set_id,
+						);
+						self.authorities = authorities;
+					}
+					return None;
 				} else {
 					v
 				},
@@ -787,6 +809,7 @@ impl<Block: BlockT> Inner<Block> {
 
 		// ensure authority is part of the set.
 		if !self.authorities.contains(&full.message.id) {
+			debug!(target: "afg", "Message from unknown voter: {}", full.message.id);
 			telemetry!(CONSENSUS_DEBUG; "afg.bad_msg_signature"; "signature" => ?full.message.id);
 			return Action::Discard(cost::UNKNOWN_VOTER);
 		}
@@ -1111,34 +1134,38 @@ impl<Block: BlockT> Inner<Block> {
 			return false;
 		}
 
-		if peer.roles.is_authority() {
-			let authorities = self.peers.authorities();
+		match peer.roles {
+			ObservedRole::OurGuardedAuthority | ObservedRole::OurSentry => true,
+			ObservedRole::Authority => {
+				let authorities = self.peers.authorities();
 
-			// the target node is an authority, on the first round duration we start by
-			// sending the message to only `sqrt(authorities)` (if we're
-			// connected to at least `MIN_LUCKY`).
-			if round_elapsed < round_duration * PROPAGATION_ALL_AUTHORITIES
-				&& authorities > MIN_LUCKY
-			{
-				self.peers.lucky_authorities.contains(who)
-			} else {
-				// otherwise we already went through the step above, so
-				// we won't filter the message and send it to all
-				// authorities for whom it is polite to do so
-				true
-			}
-		} else {
-			// the node is not an authority so we apply stricter filters
-			if round_elapsed >= round_duration * PROPAGATION_ALL {
-				// if we waited for 3 (or more) rounds
-				// then it is allowed to be sent to all peers.
-				true
-			} else if round_elapsed >= round_duration * PROPAGATION_SOME_NON_AUTHORITIES {
-				// otherwise we only send it to `sqrt(non-authorities)`.
-				self.peers.lucky_peers.contains(who)
-			} else {
-				false
-			}
+				// the target node is an authority, on the first round duration we start by
+				// sending the message to only `sqrt(authorities)` (if we're
+				// connected to at least `MIN_LUCKY`).
+				if round_elapsed < round_duration * PROPAGATION_ALL_AUTHORITIES
+					&& authorities > MIN_LUCKY
+				{
+					self.peers.lucky_authorities.contains(who)
+				} else {
+					// otherwise we already went through the step above, so
+					// we won't filter the message and send it to all
+					// authorities for whom it is polite to do so
+					true
+				}
+			},
+			ObservedRole::Full | ObservedRole::Light => {
+				// the node is not an authority so we apply stricter filters
+				if round_elapsed >= round_duration * PROPAGATION_ALL {
+					// if we waited for 3 (or more) rounds
+					// then it is allowed to be sent to all peers.
+					true
+				} else if round_elapsed >= round_duration * PROPAGATION_SOME_NON_AUTHORITIES {
+					// otherwise we only send it to `sqrt(non-authorities)`.
+					self.peers.lucky_peers.contains(who)
+				} else {
+					false
+				}
+			},
 		}
 	}
 
@@ -1160,40 +1187,66 @@ impl<Block: BlockT> Inner<Block> {
 		let round_duration = self.config.gossip_duration * ROUND_DURATION;
 		let round_elapsed = self.round_start.elapsed();
 
-		if peer.roles.is_authority() {
-			let authorities = self.peers.authorities();
+		match peer.roles {
+			ObservedRole::OurSentry | ObservedRole::OurGuardedAuthority => true,
+			ObservedRole::Authority => {
+				let authorities = self.peers.authorities();
 
-			// the target node is an authority, on the first round duration we start by
-			// sending the message to only `sqrt(authorities)` (if we're
-			// connected to at least `MIN_LUCKY`).
-			if round_elapsed < round_duration * PROPAGATION_ALL_AUTHORITIES
-				&& authorities > MIN_LUCKY
-			{
-				self.peers.lucky_authorities.contains(who)
-			} else {
-				// otherwise we already went through the step above, so
-				// we won't filter the message and send it to all
-				// authorities for whom it is polite to do so
-				true
-			}
-		} else {
-			let non_authorities = self.peers.non_authorities();
+				// the target node is an authority, on the first round duration we start by
+				// sending the message to only `sqrt(authorities)` (if we're
+				// connected to at least `MIN_LUCKY`).
+				if round_elapsed < round_duration * PROPAGATION_ALL_AUTHORITIES
+					&& authorities > MIN_LUCKY
+				{
+					self.peers.lucky_authorities.contains(who)
+				} else {
+					// otherwise we already went through the step above, so
+					// we won't filter the message and send it to all
+					// authorities for whom it is polite to do so
+					true
+				}
+			},
+			ObservedRole::Full | ObservedRole::Light => {
+				let non_authorities = self.peers.non_authorities();
 
-			// the target node is not an authority, on the first and second
-			// round duration we start by sending the message to only
-			// `sqrt(non_authorities)` (if we're connected to at least
-			// `MIN_LUCKY`).
-			if round_elapsed < round_duration * PROPAGATION_SOME_NON_AUTHORITIES
-				&& non_authorities > MIN_LUCKY
-			{
-				self.peers.lucky_peers.contains(who)
-			} else {
-				// otherwise we already went through the step above, so
-				// we won't filter the message and send it to all
-				// non-authorities for whom it is polite to do so
-				true
+				// the target node is not an authority, on the first and second
+				// round duration we start by sending the message to only
+				// `sqrt(non_authorities)` (if we're connected to at least
+				// `MIN_LUCKY`).
+				if round_elapsed < round_duration * PROPAGATION_SOME_NON_AUTHORITIES
+					&& non_authorities > MIN_LUCKY
+				{
+					self.peers.lucky_peers.contains(who)
+				} else {
+					// otherwise we already went through the step above, so
+					// we won't filter the message and send it to all
+					// non-authorities for whom it is polite to do so
+					true
+				}
 			}
 		}
+	}
+}
+
+// Prometheus metrics for [`GossipValidator`].
+pub(crate) struct Metrics {
+	messages_validated: CounterVec<U64>,
+}
+
+impl Metrics {
+	pub(crate) fn register(registry: &prometheus_endpoint::Registry) -> Result<Self, PrometheusError> {
+		Ok(Self {
+			messages_validated: register(
+				CounterVec::new(
+					Opts::new(
+						"finality_grandpa_communication_gossip_validator_messages",
+						"Number of messages validated by the finality grandpa gossip validator."
+					),
+					&["message", "action"]
+				)?,
+				registry,
+			)?,
+		})
 	}
 }
 
@@ -1201,7 +1254,8 @@ impl<Block: BlockT> Inner<Block> {
 pub(super) struct GossipValidator<Block: BlockT> {
 	inner: parking_lot::RwLock<Inner<Block>>,
 	set_state: environment::SharedVoterSetState<Block>,
-	report_sender: mpsc::UnboundedSender<PeerReport>,
+	report_sender: TracingUnboundedSender<PeerReport>,
+	metrics: Option<Metrics>,
 }
 
 impl<Block: BlockT> GossipValidator<Block> {
@@ -1211,12 +1265,23 @@ impl<Block: BlockT> GossipValidator<Block> {
 	pub(super) fn new(
 		config: crate::Config,
 		set_state: environment::SharedVoterSetState<Block>,
-	) -> (GossipValidator<Block>, mpsc::UnboundedReceiver<PeerReport>)	{
-		let (tx, rx) = mpsc::unbounded();
+		prometheus_registry: Option<&Registry>,
+	) -> (GossipValidator<Block>, TracingUnboundedReceiver<PeerReport>)	{
+		let metrics = match prometheus_registry.map(Metrics::register) {
+			Some(Ok(metrics)) => Some(metrics),
+			Some(Err(e)) => {
+				debug!(target: "afg", "Failed to register metrics: {:?}", e);
+				None
+			},
+			None => None,
+		};
+
+		let (tx, rx) = tracing_unbounded("mpsc_grandpa_gossip_validator");
 		let val = GossipValidator {
 			inner: parking_lot::RwLock::new(Inner::new(config)),
 			set_state,
 			report_sender: tx,
+			metrics: metrics,
 		};
 
 		(val, rx)
@@ -1279,12 +1344,21 @@ impl<Block: BlockT> GossipValidator<Block> {
 		let mut broadcast_topics = Vec::new();
 		let mut peer_reply = None;
 
+		// Message name for Prometheus metric recording.
+		let message_name;
+
 		let action = {
 			match GossipMessage::<Block>::decode(&mut data) {
-				Ok(GossipMessage::Vote(ref message))
-					=> self.inner.write().validate_round_message(who, message),
-				Ok(GossipMessage::Commit(ref message)) => self.inner.write().validate_commit_message(who, message),
+				Ok(GossipMessage::Vote(ref message)) => {
+					message_name = Some("vote");
+					self.inner.write().validate_round_message(who, message)
+				},
+				Ok(GossipMessage::Commit(ref message)) => {
+					message_name = Some("commit");
+					self.inner.write().validate_commit_message(who, message)
+				},
 				Ok(GossipMessage::Neighbor(update)) => {
+					message_name = Some("neighbor");
 					let (topics, action, catch_up, report) = self.inner.write().import_neighbor_message(
 						who,
 						update.into_neighbor_packet(),
@@ -1298,9 +1372,12 @@ impl<Block: BlockT> GossipValidator<Block> {
 					peer_reply = catch_up;
 					action
 				}
-				Ok(GossipMessage::CatchUp(ref message))
-					=> self.inner.write().validate_catch_up_message(who, message),
+				Ok(GossipMessage::CatchUp(ref message)) => {
+					message_name = Some("catch_up");
+					self.inner.write().validate_catch_up_message(who, message)
+				},
 				Ok(GossipMessage::CatchUpRequest(request)) => {
+					message_name = Some("catch_up_request");
 					let (reply, action) = self.inner.write().handle_catch_up_request(
 						who,
 						request,
@@ -1311,6 +1388,7 @@ impl<Block: BlockT> GossipValidator<Block> {
 					action
 				}
 				Err(e) => {
+					message_name = None;
 					debug!(target: "afg", "Error decoding message: {}", e.what());
 					telemetry!(CONSENSUS_DEBUG; "afg.err_decoding_msg"; "" => "");
 
@@ -1320,12 +1398,27 @@ impl<Block: BlockT> GossipValidator<Block> {
 			}
 		};
 
+		// Prometheus metric recording.
+		if let (Some(metrics), Some(message_name)) = (&self.metrics, message_name) {
+			let action_name = match action {
+				Action::Keep(_, _) => "keep",
+				Action::ProcessAndDiscard(_, _) => "process_and_discard",
+				Action::Discard(_) => "discard",
+			};
+			metrics.messages_validated.with_label_values(&[message_name, action_name]).inc();
+		}
+
 		(action, broadcast_topics, peer_reply)
+	}
+
+	#[cfg(test)]
+	fn inner(&self) -> &parking_lot::RwLock<Inner<Block>> {
+		&self.inner
 	}
 }
 
 impl<Block: BlockT> sc_network_gossip::Validator<Block> for GossipValidator<Block> {
-	fn new_peer(&self, context: &mut dyn ValidatorContext<Block>, who: &PeerId, roles: Roles) {
+	fn new_peer(&self, context: &mut dyn ValidatorContext<Block>, who: &PeerId, roles: ObservedRole) {
 		let packet = {
 			let mut inner = self.inner.write();
 			inner.peers.new_peer(who.clone(), roles);
@@ -1585,7 +1678,7 @@ mod tests {
 		assert!(res.unwrap().is_none());
 
 		// connect & disconnect.
-		peers.new_peer(id.clone(), Roles::AUTHORITY);
+		peers.new_peer(id.clone(), ObservedRole::Authority);
 		peers.peer_disconnected(&id);
 
 		let res = peers.update_peer_state(&id, update.clone());
@@ -1621,7 +1714,7 @@ mod tests {
 		let mut peers = Peers::default();
 		let id = PeerId::random();
 
-		peers.new_peer(id.clone(), Roles::AUTHORITY);
+		peers.new_peer(id.clone(), ObservedRole::Authority);
 
 		let mut check_update = move |update: NeighborPacket<_>| {
 			let view = peers.update_peer_state(&id, update.clone()).unwrap().unwrap();
@@ -1641,7 +1734,7 @@ mod tests {
 		let mut peers = Peers::default();
 
 		let id = PeerId::random();
-		peers.new_peer(id.clone(), Roles::AUTHORITY);
+		peers.new_peer(id.clone(), ObservedRole::Authority);
 
 		peers.update_peer_state(&id, NeighborPacket {
 			round: Round(10),
@@ -1679,6 +1772,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config(),
 			voter_set_state(),
+			None,
 		);
 
 		let set_id = 1;
@@ -1714,6 +1808,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config(),
 			voter_set_state(),
+			None,
 		);
 		let set_id = 1;
 		let auth = AuthorityId::from_slice(&[1u8; 32]);
@@ -1758,6 +1853,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config(),
 			voter_set_state(),
+			None,
 		);
 
 		let set_id = 1;
@@ -1826,6 +1922,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config(),
 			set_state.clone(),
+			None,
 		);
 
 		let set_id = 1;
@@ -1838,7 +1935,7 @@ mod tests {
 		// add the peer making the request to the validator,
 		// otherwise it is discarded
 		let mut inner = val.inner.write();
-		inner.peers.new_peer(peer.clone(), Roles::AUTHORITY);
+		inner.peers.new_peer(peer.clone(), ObservedRole::Authority);
 
 		let res = inner.handle_catch_up_request(
 			&peer,
@@ -1880,6 +1977,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config(),
 			set_state.clone(),
+			None,
 		);
 
 		// the validator starts at set id 2
@@ -1888,7 +1986,7 @@ mod tests {
 		// add the peer making the request to the validator,
 		// otherwise it is discarded
 		let peer = PeerId::random();
-		val.inner.write().peers.new_peer(peer.clone(), Roles::AUTHORITY);
+		val.inner.write().peers.new_peer(peer.clone(), ObservedRole::Authority);
 
 		let send_request = |set_id, round| {
 			let mut inner = val.inner.write();
@@ -1959,6 +2057,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config(),
 			voter_set_state(),
+			None,
 		);
 
 		// the validator starts at set id 1.
@@ -1967,7 +2066,7 @@ mod tests {
 		// add the peer making the request to the validator,
 		// otherwise it is discarded.
 		let peer = PeerId::random();
-		val.inner.write().peers.new_peer(peer.clone(), Roles::AUTHORITY);
+		val.inner.write().peers.new_peer(peer.clone(), ObservedRole::Authority);
 
 		let import_neighbor_message = |set_id, round| {
 			let (_, _, catch_up_request, _) = val.inner.write().import_neighbor_message(
@@ -2032,6 +2131,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config,
 			voter_set_state(),
+			None,
 		);
 
 		// the validator starts at set id 1.
@@ -2040,7 +2140,7 @@ mod tests {
 		// add the peer making the request to the validator,
 		// otherwise it is discarded.
 		let peer = PeerId::random();
-		val.inner.write().peers.new_peer(peer.clone(), Roles::AUTHORITY);
+		val.inner.write().peers.new_peer(peer.clone(), ObservedRole::Authority);
 
 		// importing a neighbor message from a peer in the same set in a later
 		// round should lead to a catch up request but since they're disabled
@@ -2065,6 +2165,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config(),
 			voter_set_state(),
+			None,
 		);
 
 		// the validator starts at set id 1.
@@ -2075,8 +2176,8 @@ mod tests {
 		let peer_authority = PeerId::random();
 		let peer_full = PeerId::random();
 
-		val.inner.write().peers.new_peer(peer_authority.clone(), Roles::AUTHORITY);
-		val.inner.write().peers.new_peer(peer_full.clone(), Roles::FULL);
+		val.inner.write().peers.new_peer(peer_authority.clone(), ObservedRole::Authority);
+		val.inner.write().peers.new_peer(peer_full.clone(), ObservedRole::Full);
 
 		let import_neighbor_message = |peer| {
 			let (_, _, catch_up_request, _) = val.inner.write().import_neighbor_message(
@@ -2124,6 +2225,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config,
 			voter_set_state(),
+			None,
 		);
 
 		// the validator starts at set id 1.
@@ -2132,7 +2234,7 @@ mod tests {
 		// add the peer making the requests to the validator, otherwise it is
 		// discarded.
 		let peer_full = PeerId::random();
-		val.inner.write().peers.new_peer(peer_full.clone(), Roles::FULL);
+		val.inner.write().peers.new_peer(peer_full.clone(), ObservedRole::Full);
 
 		let (_, _, catch_up_request, _) = val.inner.write().import_neighbor_message(
 			&peer_full,
@@ -2162,6 +2264,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config(),
 			voter_set_state(),
+			None,
 		);
 
 		// the validator starts at set id 1.
@@ -2194,6 +2297,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config,
 			voter_set_state(),
+			None,
 		);
 
 		// the validator start at set id 0
@@ -2207,8 +2311,8 @@ mod tests {
 		full_nodes.resize_with(30, || PeerId::random());
 
 		for i in 0..30 {
-			val.inner.write().peers.new_peer(authorities[i].clone(), Roles::AUTHORITY);
-			val.inner.write().peers.new_peer(full_nodes[i].clone(), Roles::FULL);
+			val.inner.write().peers.new_peer(authorities[i].clone(), ObservedRole::Authority);
+			val.inner.write().peers.new_peer(full_nodes[i].clone(), ObservedRole::Full);
 		}
 
 		let test = |num_round, peers| {
@@ -2271,6 +2375,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config(),
 			voter_set_state(),
+			None,
 		);
 
 		// the validator start at set id 0
@@ -2279,7 +2384,7 @@ mod tests {
 		let mut authorities = Vec::new();
 		for _ in 0..5 {
 			let peer_id = PeerId::random();
-			val.inner.write().peers.new_peer(peer_id.clone(), Roles::AUTHORITY);
+			val.inner.write().peers.new_peer(peer_id.clone(), ObservedRole::Authority);
 			authorities.push(peer_id);
 		}
 
@@ -2310,6 +2415,7 @@ mod tests {
 		let (val, _) = GossipValidator::<Block>::new(
 			config,
 			voter_set_state(),
+			None,
 		);
 
 		// the validator start at set id 0
@@ -2318,7 +2424,7 @@ mod tests {
 		let mut authorities = Vec::new();
 		for _ in 0..100 {
 			let peer_id = PeerId::random();
-			val.inner.write().peers.new_peer(peer_id.clone(), Roles::AUTHORITY);
+			val.inner.write().peers.new_peer(peer_id.clone(), ObservedRole::Authority);
 			authorities.push(peer_id);
 		}
 
@@ -2358,7 +2464,7 @@ mod tests {
 
 	#[test]
 	fn only_gossip_commits_to_peers_on_same_set() {
-		let (val, _) = GossipValidator::<Block>::new(config(), voter_set_state());
+		let (val, _) = GossipValidator::<Block>::new(config(), voter_set_state(), None);
 
 		// the validator start at set id 1
 		val.note_set(SetId(1), Vec::new(), |_, _| {});
@@ -2369,7 +2475,7 @@ mod tests {
 		val.inner
 			.write()
 			.peers
-			.new_peer(peer1.clone(), Roles::AUTHORITY);
+			.new_peer(peer1.clone(), ObservedRole::Authority);
 
 		val.inner
 			.write()
@@ -2389,7 +2495,7 @@ mod tests {
 		val.inner
 			.write()
 			.peers
-			.new_peer(peer2.clone(), Roles::AUTHORITY);
+			.new_peer(peer2.clone(), ObservedRole::Authority);
 
 		// create a commit for round 1 of set id 1
 		// targeting a block at height 2
@@ -2436,7 +2542,7 @@ mod tests {
 
 	#[test]
 	fn expire_commits_from_older_rounds() {
-		let (val, _) = GossipValidator::<Block>::new(config(), voter_set_state());
+		let (val, _) = GossipValidator::<Block>::new(config(), voter_set_state(), None);
 
 		let commit = |round, set_id, target_number| {
 			let commit = finality_grandpa::CompactCommit {
@@ -2483,5 +2589,20 @@ mod tests {
 			crate::communication::global_topic::<Block>(1),
 			&commit(0, 1, 2),
 		));
+	}
+
+	#[test]
+	fn allow_noting_different_authorities_for_same_set() {
+		let (val, _) = GossipValidator::<Block>::new(config(), voter_set_state(), None);
+
+		let a1 = vec![AuthorityId::default()];
+		val.note_set(SetId(1), a1.clone(), |_, _| {});
+
+		assert_eq!(val.inner().read().authorities, a1);
+
+		let a2 = vec![AuthorityId::default(), AuthorityId::default()];
+		val.note_set(SetId(1), a2.clone(), |_, _| {});
+
+		assert_eq!(val.inner().read().authorities, a2);
 	}
 }

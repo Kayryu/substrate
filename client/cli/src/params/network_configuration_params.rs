@@ -19,7 +19,7 @@ use std::iter;
 use std::net::Ipv4Addr;
 use structopt::StructOpt;
 use sc_network::{
-	config::{NonReservedPeerMode, TransportConfig}, multiaddr::Protocol,
+	config::{MultiaddrWithPeerId, NonReservedPeerMode, TransportConfig}, multiaddr::Protocol, Multiaddr,
 };
 use sc_service::Configuration;
 
@@ -30,12 +30,12 @@ use crate::params::node_key_params::NodeKeyParams;
 #[derive(Debug, StructOpt, Clone)]
 pub struct NetworkConfigurationParams {
 	/// Specify a list of bootnodes.
-	#[structopt(long = "bootnodes", value_name = "URL")]
-	pub bootnodes: Vec<String>,
+	#[structopt(long = "bootnodes", value_name = "ADDR")]
+	pub bootnodes: Vec<MultiaddrWithPeerId>,
 
 	/// Specify a list of reserved node addresses.
-	#[structopt(long = "reserved-nodes", value_name = "URL")]
-	pub reserved_nodes: Vec<String>,
+	#[structopt(long = "reserved-nodes", value_name = "ADDR")]
+	pub reserved_nodes: Vec<MultiaddrWithPeerId>,
 
 	/// Whether to only allow connections to/from reserved nodes.
 	///
@@ -47,14 +47,14 @@ pub struct NetworkConfigurationParams {
 	/// Specify a list of sentry node public addresses.
 	#[structopt(
 		long = "sentry-nodes",
-		value_name = "URL",
+		value_name = "ADDR",
 		conflicts_with_all = &[ "sentry" ]
 	)]
-	pub sentry_nodes: Vec<String>,
+	pub sentry_nodes: Vec<MultiaddrWithPeerId>,
 
 	/// Listen on this multiaddress.
 	#[structopt(long = "listen-addr", value_name = "LISTEN_ADDR")]
-	pub listen_addr: Vec<String>,
+	pub listen_addr: Vec<Multiaddr>,
 
 	/// Specify p2p protocol TCP port.
 	///
@@ -83,9 +83,9 @@ pub struct NetworkConfigurationParams {
 	#[structopt(long = "no-mdns")]
 	pub no_mdns: bool,
 
-	/// Maximum number of peers to ask the same blocks in parallel.
+	/// Maximum number of peers from which to ask for the same blocks in parallel.
 	///
-	/// This allows downlading announced blocks from multiple peers. Decrease to save
+	/// This allows downloading announced blocks from multiple peers. Decrease to save
 	/// traffic and risk increased latency.
 	#[structopt(long = "max-parallel-downloads", value_name = "COUNT", default_value = "5")]
 	pub max_parallel_downloads: u32,
@@ -117,13 +117,7 @@ impl NetworkConfigurationParams {
 			config.network.non_reserved_mode = NonReservedPeerMode::Deny;
 		}
 
-		config.network.sentry_nodes.extend(self.sentry_nodes.clone());
-
-		for addr in self.listen_addr.iter() {
-			let addr = addr.parse().ok().ok_or(error::Error::InvalidListenMultiaddress)?;
-			config.network.listen_addresses.push(addr);
-		}
-
+		config.network.listen_addresses.extend(self.listen_addr.iter().cloned());
 		if config.network.listen_addresses.is_empty() {
 			let port = match self.port {
 				Some(port) => port,

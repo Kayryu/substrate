@@ -153,6 +153,7 @@ impl<Block> BlockchainHeaderBackend<Block> for LightStorage<Block>
 			genesis_hash: meta.genesis_hash,
 			finalized_hash: meta.finalized_hash,
 			finalized_number: meta.finalized_number,
+			number_leaves: 1,
 		}
 	}
 
@@ -592,8 +593,10 @@ impl<Block> LightBlockchainStorage<Block> for LightStorage<Block>
 				average_transaction_size: io_stats.avg_transaction_size() as u64,
 				// Light client does not track those
 				state_reads: 0,
-				state_reads_cache: 0,
 				state_writes: 0,
+				state_reads_cache: 0,
+				state_writes_cache: 0,
+				state_writes_nodes: 0,
 			}
 		})
 	}
