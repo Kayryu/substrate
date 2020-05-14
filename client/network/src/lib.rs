@@ -53,9 +53,10 @@
 //! - mDNS. We perform a UDP broadcast on the local network. Nodes that listen may respond with
 //! their identity. More info [here](https://github.com/libp2p/specs/blob/master/discovery/mdns.md).
 //! mDNS can be disabled in the network configuration.
-//! - Kademlia random walk. Once connected, we perform random Kademlia `FIND_NODE` requests in
-//! order for nodes to propagate to us their view of the network. More information about Kademlia
-//! can be found [on Wikipedia](https://en.wikipedia.org/wiki/Kademlia).
+//! - Kademlia random walk. Once connected, we perform random Kademlia `FIND_NODE` requests on the
+//! configured Kademlia DHTs (one per configured chain protocol) in order for nodes to propagate to
+//! us their view of the network. More information about Kademlia can be found [on
+//! Wikipedia](https://en.wikipedia.org/wiki/Kademlia).
 //!
 //! ## Connection establishment
 //!
@@ -77,6 +78,7 @@
 //! frames. Encryption and multiplexing are additionally negotiated again inside this channel.
 //! - DNS for addresses of the form `/dns4/example.com/tcp/5` or `/dns4/example.com/tcp/5/ws`. A
 //! node's address can contain a domain name.
+//! - (All of the above using IPv6 instead of IPv4.)
 //!
 //! On top of the base-layer protocol, the [Noise](https://noiseprotocol.org/) protocol is
 //! negotiated and applied. The exact handshake protocol is experimental and is subject to change.
@@ -109,7 +111,7 @@
 //! to a disconnection.
 //! - **[`/ipfs/id/1.0.0`](https://github.com/libp2p/specs/tree/master/identify)**. We
 //! periodically open an ephemeral substream in order to ask information from the remote.
-//! - **[`/ipfs/kad/1.0.0`](https://github.com/libp2p/specs/pull/108)**. We periodically open
+//! - **[`/<protocol_id>/kad`](https://github.com/libp2p/specs/pull/108)**. We periodically open
 //! ephemeral substreams for Kademlia random walk queries. Each Kademlia query is done in a
 //! separate substream.
 //!
@@ -210,7 +212,14 @@
 //! notifications protocol.
 //!
 //! At the moment, for backwards-compatibility, notification protocols are tied to the legacy
-//! Substrate substream. In the future, though, it will no longer be the case.
+//! Substrate substream. Additionally, the handshake message is hardcoded to be a single 8-bits
+//! integer representing the role of the node:
+//!
+//! - 1 for a full node.
+//! - 2 for a light node.
+//! - 4 for an authority.
+//!
+//! In the future, though, these restrictions will be removed.
 //!
 //! # Usage
 //!
@@ -233,11 +242,15 @@
 //!
 
 mod behaviour;
+mod block_requests;
 mod chain;
 mod debug_info;
 mod discovery;
+mod finality_requests;
+mod light_client_handler;
 mod on_demand_layer;
 mod protocol;
+mod schema;
 mod service;
 mod transport;
 mod utils;
@@ -246,7 +259,7 @@ pub mod config;
 pub mod error;
 pub mod network_state;
 
-pub use service::{NetworkService, NetworkStateInfo, NetworkWorker, ExHashT, ReportHandle};
+pub use service::{NetworkService, NetworkWorker};
 pub use protocol::PeerInfo;
 pub use protocol::event::{Event, DhtEvent, ObservedRole};
 pub use protocol::sync::SyncState;
@@ -255,3 +268,47 @@ pub use libp2p::{Multiaddr, PeerId};
 pub use libp2p::multiaddr;
 
 pub use sc_peerset::ReputationChange;
+
+/// The maximum allowed number of established connections per peer.
+///
+/// Typically, and by design of the network behaviours in this crate,
+/// there is a single established connection per peer. However, to
+/// avoid unnecessary and nondeterministic connection closure in
+/// case of (possibly repeated) simultaneous dialing attempts between
+/// two peers, the per-peer connection limit is not set to 1 but 2.
+const MAX_CONNECTIONS_PER_PEER: usize = 2;
+
+/// Minimum Requirements for a Hash within Networking
+pub trait ExHashT: std::hash::Hash + Eq + std::fmt::Debug + Clone + Send + Sync + 'static {}
+
+impl<T> ExHashT for T where T: std::hash::Hash + Eq + std::fmt::Debug + Clone + Send + Sync + 'static
+{}
+
+/// A cloneable handle for reporting cost/benefits of peers.
+#[derive(Clone)]
+pub struct ReportHandle {
+	inner: sc_peerset::PeersetHandle, // wraps it so we don't have to worry about breaking API.
+}
+
+impl From<sc_peerset::PeersetHandle> for ReportHandle {
+	fn from(peerset_handle: sc_peerset::PeersetHandle) -> Self {
+		ReportHandle { inner: peerset_handle }
+	}
+}
+
+impl ReportHandle {
+	/// Report a given peer as either beneficial (+) or costly (-) according to the
+	/// given scalar.
+	pub fn report_peer(&self, who: PeerId, cost_benefit: ReputationChange) {
+		self.inner.report_peer(who, cost_benefit);
+	}
+}
+
+/// Trait for providing information about the local network state
+pub trait NetworkStateInfo {
+	/// Returns the local external addresses.
+	fn external_addresses(&self) -> Vec<Multiaddr>;
+
+	/// Returns the local Peer ID.
+	fn local_peer_id(&self) -> PeerId;
+}

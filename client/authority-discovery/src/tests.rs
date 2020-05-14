@@ -17,8 +17,11 @@
 use std::{iter::FromIterator, sync::{Arc, Mutex}};
 
 use futures::channel::mpsc::channel;
-use futures::executor::block_on;
-use futures::future::poll_fn;
+use futures::executor::{block_on, LocalPool};
+use futures::future::{poll_fn, FutureExt};
+use futures::sink::SinkExt;
+use futures::task::LocalSpawn;
+use futures::poll;
 use libp2p::{kad, PeerId};
 
 use sp_api::{ProvideRuntimeApi, ApiRef};
@@ -159,13 +162,24 @@ sp_api::mock_impl_runtime_apis! {
 	}
 }
 
-#[derive(Default)]
 struct TestNetwork {
+	peer_id: PeerId,
 	// Whenever functions on `TestNetwork` are called, the function arguments are added to the
 	// vectors below.
 	pub put_value_call: Arc<Mutex<Vec<(kad::record::Key, Vec<u8>)>>>,
 	pub get_value_call: Arc<Mutex<Vec<kad::record::Key>>>,
 	pub set_priority_group_call: Arc<Mutex<Vec<(String, HashSet<Multiaddr>)>>>,
+}
+
+impl Default for TestNetwork {
+	fn default() -> Self {
+		TestNetwork {
+			peer_id: PeerId::random(),
+			put_value_call: Default::default(),
+			get_value_call: Default::default(),
+			set_priority_group_call: Default::default(),
+		}
+	}
 }
 
 impl NetworkProvider for TestNetwork {
@@ -190,11 +204,11 @@ impl NetworkProvider for TestNetwork {
 
 impl NetworkStateInfo for TestNetwork {
 	fn local_peer_id(&self) -> PeerId {
-		PeerId::random()
+		self.peer_id.clone()
 	}
 
 	fn external_addresses(&self) -> Vec<Multiaddr> {
-		vec![]
+		vec!["/ip6/2001:db8::".parse().unwrap()]
 	}
 }
 
@@ -213,40 +227,12 @@ fn new_registers_metrics() {
 		test_api,
 		network.clone(),
 		vec![],
-		key_store,
 		dht_event_rx.boxed(),
+		Role::Authority(key_store),
 		Some(registry.clone()),
 	);
 
 	assert!(registry.gather().len() > 0);
-}
-
-#[test]
-fn publish_ext_addresses_puts_record_on_dht() {
-	let (_dht_event_tx, dht_event_rx) = channel(1000);
-	let network: Arc<TestNetwork> = Arc::new(Default::default());
-	let key_store = KeyStore::new();
-	let public = key_store
-		.write()
-		.sr25519_generate_new(key_types::AUTHORITY_DISCOVERY, None)
-		.unwrap();
-	let test_api = Arc::new(TestApi {
-		authorities: vec![public.into()],
-	});
-
-	let mut authority_discovery = AuthorityDiscovery::new(
-		test_api,
-		network.clone(),
-		vec![],
-		key_store,
-		dht_event_rx.boxed(),
-		None,
-	);
-
-	authority_discovery.publish_ext_addresses().unwrap();
-
-	// Expect authority discovery to put a new record onto the dht.
-	assert_eq!(network.put_value_call.lock().unwrap().len(), 1);
 }
 
 #[test]
@@ -269,8 +255,8 @@ fn request_addresses_of_others_triggers_dht_get_query() {
 		test_api,
 		network.clone(),
 		vec![],
-		key_store,
 		dht_event_rx.boxed(),
+		Role::Authority(key_store),
 		None,
 	);
 
@@ -281,14 +267,57 @@ fn request_addresses_of_others_triggers_dht_get_query() {
 }
 
 #[test]
-fn handle_dht_events_with_value_found_should_call_set_priority_group() {
+fn publish_discover_cycle() {
 	let _ = ::env_logger::try_init();
-	// Create authority discovery.
+
+	// Node A publishing its address.
+
+	let (_dht_event_tx, dht_event_rx) = channel(1000);
+
+	let network: Arc<TestNetwork> = Arc::new(Default::default());
+	let node_a_multiaddr = {
+		let peer_id = network.local_peer_id();
+		let address = network.external_addresses().pop().unwrap();
+
+		address.with(libp2p::core::multiaddr::Protocol::P2p(
+			peer_id.into(),
+		))
+	};
+
+	let key_store = KeyStore::new();
+	let node_a_public = key_store
+		.write()
+		.sr25519_generate_new(key_types::AUTHORITY_DISCOVERY, None)
+		.unwrap();
+	let test_api = Arc::new(TestApi {
+		authorities: vec![node_a_public.into()],
+	});
+
+	let mut authority_discovery = AuthorityDiscovery::new(
+		test_api,
+		network.clone(),
+		vec![],
+		dht_event_rx.boxed(),
+		Role::Authority(key_store),
+		None,
+	);
+
+	authority_discovery.publish_ext_addresses().unwrap();
+
+	// Expect authority discovery to put a new record onto the dht.
+	assert_eq!(network.put_value_call.lock().unwrap().len(), 1);
+
+	let dht_event = {
+		let (key, value) = network.put_value_call.lock().unwrap().pop().unwrap();
+		sc_network::DhtEvent::ValueFound(vec![(key, value)])
+	};
+
+	// Node B discovering node A's address.
 
 	let (mut dht_event_tx, dht_event_rx) = channel(1000);
-	let key_pair = AuthorityPair::from_seed_slice(&[1; 32]).unwrap();
 	let test_api = Arc::new(TestApi {
-		authorities: vec![key_pair.public()],
+		// Make sure node B identifies node A as an authority.
+		authorities: vec![node_a_public.into()],
 	});
 	let network: Arc<TestNetwork> = Arc::new(Default::default());
 	let key_store = KeyStore::new();
@@ -297,38 +326,18 @@ fn handle_dht_events_with_value_found_should_call_set_priority_group() {
 		test_api,
 		network.clone(),
 		vec![],
-		key_store,
 		dht_event_rx.boxed(),
+		Role::Authority(key_store),
 		None,
 	);
 
-	// Create sample dht event.
-
-	let authority_id_1 = hash_authority_id(key_pair.public().as_ref()).unwrap();
-	let address_1: Multiaddr = "/ip6/2001:db8::".parse().unwrap();
-
-	let mut serialized_addresses = vec![];
-	schema::AuthorityAddresses {
-		addresses: vec![address_1.to_vec()],
-	}
-	.encode(&mut serialized_addresses)
-	.unwrap();
-
-	let signature = key_pair.sign(serialized_addresses.as_ref()).encode();
-	let mut signed_addresses = vec![];
-	schema::SignedAuthorityAddresses {
-		addresses: serialized_addresses,
-		signature: signature,
-	}
-	.encode(&mut signed_addresses)
-	.unwrap();
-
-	let dht_event = sc_network::DhtEvent::ValueFound(vec![(authority_id_1, signed_addresses)]);
 	dht_event_tx.try_send(dht_event).unwrap();
 
-	// Make authority discovery handle the event.
 	let f = |cx: &mut Context<'_>| -> Poll<()> {
-		authority_discovery.handle_dht_events(cx).unwrap();
+		// Make authority discovery handle the event.
+		if let Poll::Ready(e) = authority_discovery.handle_dht_events(cx) {
+			panic!("Unexpected error: {:?}", e);
+		}
 
 		// Expect authority discovery to set the priority set.
 		assert_eq!(network.set_priority_group_call.lock().unwrap().len(), 1);
@@ -337,7 +346,7 @@ fn handle_dht_events_with_value_found_should_call_set_priority_group() {
 			network.set_priority_group_call.lock().unwrap()[0],
 			(
 				"authorities".to_string(),
-				HashSet::from_iter(vec![address_1.clone()].into_iter())
+				HashSet::from_iter(vec![node_a_multiaddr.clone()].into_iter())
 			)
 		);
 
@@ -345,4 +354,108 @@ fn handle_dht_events_with_value_found_should_call_set_priority_group() {
 	};
 
 	let _ = block_on(poll_fn(f));
+}
+
+#[test]
+fn terminate_when_event_stream_terminates() {
+	let (dht_event_tx, dht_event_rx) = channel(1000);
+	let network: Arc<TestNetwork> = Arc::new(Default::default());
+	let key_store = KeyStore::new();
+	let test_api = Arc::new(TestApi {
+		authorities: vec![],
+	});
+
+	let mut authority_discovery = AuthorityDiscovery::new(
+		test_api,
+		network.clone(),
+		vec![],
+		dht_event_rx.boxed(),
+		Role::Authority(key_store),
+		None,
+	);
+
+	block_on(async {
+		assert_eq!(Poll::Pending, poll!(&mut authority_discovery));
+
+		// Simulate termination of the network through dropping the sender side of the dht event
+		// channel.
+		drop(dht_event_tx);
+
+		assert_eq!(
+			Poll::Ready(()), poll!(&mut authority_discovery),
+			"Expect the authority discovery module to terminate once the sending side of the dht \
+			event channel is terminated.",
+		);
+	});
+}
+
+#[test]
+fn dont_stop_polling_when_error_is_returned() {
+	#[derive(PartialEq, Debug)]
+	enum Event {
+		Processed,
+		End,
+	};
+
+	let (mut dht_event_tx, dht_event_rx) = channel(1000);
+	let (mut discovery_update_tx, mut discovery_update_rx) = channel(1000);
+	let network: Arc<TestNetwork> = Arc::new(Default::default());
+	let key_store = KeyStore::new();
+	let test_api = Arc::new(TestApi {
+		authorities: vec![],
+	});
+	let mut pool = LocalPool::new();
+
+	let mut authority_discovery = AuthorityDiscovery::new(
+		test_api,
+		network.clone(),
+		vec![],
+		dht_event_rx.boxed(),
+		Role::Authority(key_store),
+		None,
+	);
+
+	// Spawn the authority discovery to make sure it is polled independently.
+	//
+	// As this is a local pool, only one future at a time will have the CPU and
+	// can make progress until the future returns `Pending`.
+	pool.spawner().spawn_local_obj(
+		futures::future::poll_fn(move |ctx| {
+			match std::pin::Pin::new(&mut authority_discovery).poll(ctx) {
+				Poll::Ready(()) => {},
+				Poll::Pending => {
+					discovery_update_tx.send(Event::Processed).now_or_never();
+					return Poll::Pending;
+				},
+			}
+			let _ = discovery_update_tx.send(Event::End).now_or_never().unwrap();
+			Poll::Ready(())
+		}).boxed_local().into(),
+	).expect("Spawns authority discovery");
+
+	pool.run_until(
+		// The future that drives the event stream
+		async {
+			// Send an event that should generate an error
+			let _ = dht_event_tx.send(DhtEvent::ValueFound(Default::default())).now_or_never();
+			// Send the same event again to make sure that the event stream needs to be polled twice
+			// to be woken up again.
+			let _ = dht_event_tx.send(DhtEvent::ValueFound(Default::default())).now_or_never();
+
+			// Now we call `await` and give the control to the authority discovery future.
+			assert_eq!(Some(Event::Processed), discovery_update_rx.next().await);
+
+			// Drop the event rx to stop the authority discovery. If it was polled correctly, it
+			// should end properly.
+			drop(dht_event_tx);
+
+			assert!(
+				discovery_update_rx.collect::<Vec<Event>>()
+					.await
+					.into_iter()
+					.any(|evt| evt == Event::End),
+				"The authority discovery should have ended",
+			);
+		}
+	);
 }

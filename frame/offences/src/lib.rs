@@ -27,7 +27,7 @@ mod tests;
 use sp_std::vec::Vec;
 use frame_support::{
 	decl_module, decl_event, decl_storage, Parameter, debug,
-	weights::{Weight, SimpleDispatchInfo, WeighData},
+	weights::Weight,
 };
 use sp_runtime::{traits::Hash, Perbill};
 use sp_staking::{
@@ -44,7 +44,7 @@ type OpaqueTimeSlot = Vec<u8>;
 type ReportIdOf<T> = <T as frame_system::Trait>::Hash;
 
 /// Type of data stored as a deferred offence
-type DeferredOffenceOf<T> = (
+pub type DeferredOffenceOf<T> = (
 	Vec<OffenceDetails<<T as frame_system::Trait>::AccountId, <T as Trait>::IdentificationTuple>>,
 	Vec<Perbill>,
 	SessionIndex,
@@ -69,7 +69,7 @@ decl_storage! {
 
 		/// Deferred reports that have been rejected by the offence handler and need to be submitted
 		/// at a later time.
-		DeferredOffences get(deferred_offences): Vec<DeferredOffenceOf<T>>;
+		DeferredOffences get(fn deferred_offences): Vec<DeferredOffenceOf<T>>;
 
 		/// A vector of reports of the same kind that happened at the same time slot.
 		ConcurrentReportsIndex:
@@ -99,14 +99,6 @@ decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		fn deposit_event() = default;
 
-		fn on_runtime_upgrade() -> Weight {
-			Reports::<T>::remove_all();
-			ConcurrentReportsIndex::<T>::remove_all();
-			ReportsByKindIndex::remove_all();
-
-			SimpleDispatchInfo::default().weigh_data(())
-		}
-
 		fn on_initialize(now: T::BlockNumber) -> Weight {
 			// only decode storage if we can actually submit anything again.
 			if T::OnOffenceHandler::can_report() {
@@ -125,7 +117,7 @@ decl_module! {
 				})
 			}
 
-			SimpleDispatchInfo::default().weigh_data(())
+			0
 		}
 	}
 }
@@ -248,6 +240,11 @@ impl<T: Trait> Module<T> {
 		} else {
 			None
 		}
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	pub fn set_deferred_offences(offences: Vec<DeferredOffenceOf<T>>) {
+		<DeferredOffences<T>>::put(offences);
 	}
 }
 

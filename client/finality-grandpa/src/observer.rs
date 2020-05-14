@@ -111,7 +111,7 @@ fn grandpa_observer<BE, Block: BlockT, Client, S, F>(
 			Err(e) => return future::err(e.into()),
 		};
 
-		if let Some(_) = validation_result.ghost() {
+		if validation_result.ghost().is_some() {
 			let finalized_hash = commit.target_hash;
 			let finalized_number = commit.target_number;
 
@@ -124,6 +124,7 @@ fn grandpa_observer<BE, Block: BlockT, Client, S, F>(
 				finalized_hash,
 				finalized_number,
 				(round, commit).into(),
+				false,
 			) {
 				Ok(_) => {},
 				Err(e) => return future::err(e),
@@ -174,6 +175,7 @@ where
 		select_chain: _,
 		persistent_data,
 		voter_commands_rx,
+		..
 	} = link;
 
 	let network = NetworkBridge::new(
@@ -187,7 +189,7 @@ where
 		client,
 		network,
 		persistent_data,
-		config.keystore.clone(),
+		config.keystore,
 		voter_commands_rx
 	);
 
@@ -408,11 +410,13 @@ mod tests {
 			(Arc::new(client), backend)
 		};
 
+		let voters = vec![(sp_keyring::Ed25519Keyring::Alice.public().into(), 1)];
+
 		let persistent_data = aux_schema::load_persistent(
 			&*backend,
 			client.info().genesis_hash,
 			0,
-			|| Ok(vec![]),
+			|| Ok(voters),
 		).unwrap();
 
 		let (_tx, voter_command_rx) = tracing_unbounded("");
